@@ -6,11 +6,12 @@ import { Ledger, fingerprint } from '../wallet/ledger';
 interface SoloState extends SoloView {
     seed: string;
     reserved: number;
+    startFingerprint: string;
 }
 @Injectable()
 export class SoloService {
     constructor(private db: Database, private ledger: Ledger) { }
-    view(s: SoloState): SoloView { const { seed, reserved, ...safe } = s; return { ...safe, ...(s.status !== 'ACTIVE' ? { serverSeed: seed } : {}) }; }
+    view(s: SoloState): SoloView { const { seed, reserved, startFingerprint, ...safe } = s; return { ...safe, ...(s.status !== 'ACTIVE' ? { serverSeed: seed } : {}) }; }
     async seed(user: string) { const id = randomUUID(), seed = randomBytes(32).toString('hex'), hash = await sha256(seed); await this.db.source.query('INSERT INTO solo_seeds(id,owner_id,server_seed,seed_hash) VALUES($1,$2,$3,$4)', [id, user, seed, hash]); return { id, hash }; }
     async get(id: string, user: string) { const [r] = await this.db.source.query('SELECT state FROM solo_sessions WHERE id=$1 AND owner_id=$2', [id, user]); if (!r)
         throw new Error('Solo session not found'); return this.view(r.state); }
@@ -24,7 +25,7 @@ export class SoloService {
             await m.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`solo-start:${input.key}`]);
             const [existing] = await m.query('SELECT state,owner_id FROM solo_sessions WHERE start_key=$1', [input.key]);
             if (existing) {
-                if (existing.owner_id !== user || existing.state.stake !== input.stake || existing.state.clientSeed !== input.clientSeed)
+                if (existing.owner_id !== user || existing.state.startFingerprint !== fingerprint({user,...input}))
                     throw new Error('Idempotency conflict');
                 return this.view(existing.state);
             }
@@ -37,7 +38,7 @@ export class SoloService {
             const id = randomUUID(), reserved = soloPayout(input.stake, 1);
             await this.ledger.account(m, `solo:${id}`, 'ESCROW');
             await this.ledger.post(m, `solo:${id}:stake`, 'SOLO_STAKE', id, [{ account: `user:${user}`, amount: -BigInt(input.stake) }, { account: 'house:bankroll', amount: -BigInt(reserved - input.stake) }, { account: `solo:${id}`, amount: BigInt(reserved) }]);
-            const s: SoloState = { id, stake: input.stake, clientSeed: input.clientSeed, serverSeedHash: seed.seed_hash, seed: seed.server_seed, nonce: 0, goals: 0, payout: 0, status: 'ACTIVE', history: [], reserved };
+            const s: SoloState = { id, stake: input.stake, clientSeed: input.clientSeed, serverSeedHash: seed.seed_hash, seed: seed.server_seed, nonce: 0, goals: 0, payout: 0, status: 'ACTIVE', history: [], reserved, startFingerprint:fingerprint({user,...input}) };
             await m.query('INSERT INTO solo_sessions(id,owner_id,start_key,state) VALUES($1,$2,$3,$4)', [id, user, input.key, JSON.stringify(s)]);
             await m.query('UPDATE solo_seeds SET used=true WHERE id=$1', [input.seedId]);
             await m.query('UPDATE users SET active_game=$2 WHERE id=$1', [user, `solo:${id}`]);

@@ -96,6 +96,7 @@ export class MatchEngine {
             await this.redis.client.zrem('spotkick:queue', ...stale);
     }
     async create(m: EntityManager, players: Player[], stake: number) {
+        players = players.map(({id,name,bot}) => ({id,name,bot}));
         const id = randomUUID(), seed = randomBytes(32).toString('hex'), now = Date.now();
         const s: MatchState = { id, phase: 'MATCHED', version: 0, players, stake, pot: stake * 2, rakeBps: Number(process.env.RAKE_BPS || 300), exchange: 0, round: 1, shooter: 0, score: [0, 0], deadline: now + choiceMs(), committed: [], commitments: {}, revealed: [], results: [], timeoutSeedHash: await sha256(seed), seed, commits: {}, reveals: {}, fallbacks: {}, timedOut: [], audit: [], transitions: [{ phase: 'QUEUED', at: now }, { phase: 'MATCHED', at: now }] };
         await this.ledger.account(m, `escrow:${id}`, 'ESCROW');

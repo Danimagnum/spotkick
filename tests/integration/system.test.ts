@@ -49,6 +49,7 @@ describe('authoritative matches', () => {
         let view = await engine.get(id, a.id);
         expect(view.phase).toBe('ROUND_1_COMMIT');
         expect(view).not.toHaveProperty('seed');
+        expect(view.players[0]).not.toHaveProperty('token');
         expect(await balance(`user:${a.id}`)).toBe(99000n);
         await expect(engine.get(id, randomUUID())).rejects.toThrow();
         for (let exchange = 0; exchange < 6; exchange++) {

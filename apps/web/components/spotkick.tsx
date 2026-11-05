@@ -118,8 +118,21 @@ export function SpotKick({ initialMode }: {
         setBusy(false);
     } };
     const find = () => act(async () => { await call('queue:join', { stake }); setQueued(true); setQueueStarted(Date.now()); });
-    const pick = (choice: Zone) => act(async () => { if (!match || !me)
-        return; setSelected(choice); const salt = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join(''); sessionStorage.setItem(secretKey(match, me.id), JSON.stringify({ choice, salt })); const hash = await commitment(match.id, match.exchange, me.id, choice, salt); acceptMatch(await call<MatchView>('choice:commit', { matchId: match.id, exchange: match.exchange, hash })); });
+    const pick = (choice: Zone) => act(async () => {
+        if (!match || !me) return;
+        const key = secretKey(match,me.id);
+        const saved = sessionStorage.getItem(key);
+        // An acknowledgement can be lost after the server accepted a commitment.
+        // Retrying must preserve that exact secret, including across reloads.
+        const secret: {choice:Zone;salt:string} = saved ? JSON.parse(saved) : {
+            choice,
+            salt:Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('')
+        };
+        setSelected(secret.choice);
+        sessionStorage.setItem(key,JSON.stringify(secret));
+        const hash=await commitment(match.id,match.exchange,me.id,secret.choice,secret.salt);
+        acceptMatch(await call<MatchView>('choice:commit',{matchId:match.id,exchange:match.exchange,hash}));
+    });
     const startSolo = () => act(async () => { if (!seed)
         return; const next = await request('/solo/start', { stake, seedId: seed.id, clientSeed, key: crypto.randomUUID() }); setSolo(next); await refresh(); });
     const soloAction = (choice?: Zone) => act(async () => { if (!solo)
