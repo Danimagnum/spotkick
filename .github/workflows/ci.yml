@@ -35,7 +35,10 @@ jobs:
       - name: Start production apps
         run: |
           node apps/api/dist/main.js > /tmp/spotkick-api.log 2>&1 &
-          pnpm --filter @spotkick/web start > /tmp/spotkick-web.log 2>&1 &
+          mkdir -p apps/web/.next/standalone/apps/web/.next
+          cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+          cp -r apps/web/public apps/web/.next/standalone/apps/web/public
+          PORT=3000 HOSTNAME=0.0.0.0 node apps/web/.next/standalone/apps/web/server.js > /tmp/spotkick-web.log 2>&1 &
           for i in $(seq 1 60); do
             if curl -fsS http://localhost:3001/health && curl -fsS http://localhost:3000 > /dev/null; then exit 0; fi
             sleep 1

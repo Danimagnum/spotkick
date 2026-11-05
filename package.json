@@ -10,8 +10,8 @@
     "test:e2e": "playwright test",
     "typecheck": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/api typecheck && pnpm --filter @spotkick/web typecheck",
     "dev:api": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/api dev",
-    "dev:web": "pnpm --filter @spotkick/web dev",
-    "db:migrate": "pnpm --filter @spotkick/api migrate"
+    "dev:web": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/web dev",
+    "db:migrate": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/api migrate"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.0",
