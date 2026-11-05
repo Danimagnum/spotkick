@@ -9,7 +9,11 @@ export function makeDataSource(url = process.env.DATABASE_URL || 'postgres://spo
 @Injectable()
 export class Database implements OnModuleInit, OnModuleDestroy {
   source = makeDataSource();
-  async onModuleInit() { await this.source.initialize(); await this.source.runMigrations(); }
+  async onModuleInit() {
+    await this.source.initialize();const runner=this.source.createQueryRunner();await runner.connect();
+    await runner.query('SELECT pg_advisory_lock(481590)');
+    try {await this.source.runMigrations();} finally {await runner.query('SELECT pg_advisory_unlock(481590)');await runner.release();}
+  }
   async onModuleDestroy() { if(this.source.isInitialized) await this.source.destroy(); }
   tx<T>(fn: (m: EntityManager) => Promise<T>) { return this.source.transaction(fn); }
 }

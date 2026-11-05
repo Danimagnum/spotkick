@@ -15,7 +15,7 @@ export interface ExchangeResult { index: number; round: number; shooter: number;
 export interface MatchView {
   id: string; phase: MatchPhase; version: number; players: Player[]; stake: number; pot: number;
   rakeBps: number; exchange: number; round: number; shooter: number; score: [number, number];
-  deadline: number; committed: string[]; revealed: string[]; results: ExchangeResult[];
+  deadline: number; committed: string[]; commitments: Record<string,string>; revealed: string[]; results: ExchangeResult[];
   winner?: string; payout?: number; timeoutSeedHash: string; timeoutSeed?: string;
 }
 export interface LobbyView { online: Player[]; matches: number; recent: { id: string; winner: string; payout: number; score: number[] }[] }
