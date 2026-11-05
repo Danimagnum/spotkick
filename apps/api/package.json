@@ -1,8 +1,29 @@
 {
-  "name": "@spotkick/api", "version": "0.1.0", "private": true,
-  "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc -p tsconfig.json --noEmit", "dev": "pnpm build && node --watch dist/main.js", "start": "node dist/main.js", "migrate": "pnpm build && node dist/migrate.js" },
+  "name": "@spotkick/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "pnpm build && node --watch dist/main.js",
+    "start": "node dist/main.js",
+    "migrate": "pnpm build && node dist/migrate.js"
+  },
   "dependencies": {
-    "@spotkick/shared": "workspace:*", "@nestjs/common": "^11.1.0", "@nestjs/core": "^11.1.0", "@nestjs/platform-express": "^11.1.0", "@nestjs/platform-socket.io": "^11.1.0", "@nestjs/websockets": "^11.1.0",
-    "@sentry/node": "^10.0.0", "@socket.io/redis-adapter": "^8.3.0", "ioredis": "^5.9.0", "pg": "^8.16.0", "reflect-metadata": "^0.2.2", "rxjs": "^7.8.2", "socket.io": "^4.8.1", "typeorm": "^0.3.28", "zod": "^3.25.76"
+    "@spotkick/shared": "workspace:*",
+    "@nestjs/common": "^11.1.0",
+    "@nestjs/core": "^11.1.0",
+    "@nestjs/platform-express": "^11.1.0",
+    "@nestjs/platform-socket.io": "^11.1.0",
+    "@nestjs/websockets": "^11.1.0",
+    "@sentry/node": "^10.0.0",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "ioredis": "^5.9.0",
+    "pg": "^8.16.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "socket.io": "^4.8.1",
+    "typeorm": "^0.3.28",
+    "zod": "^3.25.76"
   }
 }

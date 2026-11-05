@@ -1,6 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 export class Initial1700000000000 implements MigrationInterface {
-  async up(q: QueryRunner) { await q.query(`
+    async up(q: QueryRunner) {
+        await q.query(`
     CREATE TABLE users (id uuid PRIMARY KEY, name text NOT NULL, token_hash text UNIQUE NOT NULL, bot boolean NOT NULL DEFAULT false, active_game text, queue_stake integer, queued_at bigint, created_at timestamptz NOT NULL DEFAULT now());
     CREATE TABLE accounts (id text PRIMARY KEY, kind text NOT NULL CHECK(kind IN ('USER','ESCROW','HOUSE_RAKE','HOUSE_BANKROLL','ISSUANCE')), owner_id uuid REFERENCES users(id), created_at timestamptz NOT NULL DEFAULT now());
     CREATE TABLE ledger_transactions (id uuid PRIMARY KEY, idempotency_key text UNIQUE NOT NULL, fingerprint text NOT NULL, operation text NOT NULL, reference text, created_at timestamptz NOT NULL DEFAULT now());
@@ -22,6 +23,7 @@ export class Initial1700000000000 implements MigrationInterface {
     CREATE TABLE request_keys (key text PRIMARY KEY, owner_id uuid NOT NULL REFERENCES users(id), fingerprint text NOT NULL, response jsonb NOT NULL);
     CREATE TABLE outbox_events (id bigserial PRIMARY KEY, topic text NOT NULL, payload jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), published_at timestamptz);
     CREATE INDEX pending_outbox_idx ON outbox_events(id) WHERE published_at IS NULL;
-  `); }
-  async down(q: QueryRunner) { await q.query(`DROP TABLE outbox_events,request_keys,solo_sessions,solo_seeds,matches,ledger_entries,ledger_transactions,accounts,users CASCADE; DROP FUNCTION check_balanced_transaction(),reject_ledger_mutation();`); }
+  `);
+    }
+    async down(q: QueryRunner) { await q.query(`DROP TABLE outbox_events,request_keys,solo_sessions,solo_seeds,matches,ledger_entries,ledger_transactions,accounts,users CASCADE; DROP FUNCTION check_balanced_transaction(),reject_ledger_mutation();`); }
 }
