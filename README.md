@@ -10,6 +10,8 @@ A real-time penalty arena built to make concurrency, fairness and wallet consist
 
 Start with the [five-minute demo](docs/DEMO.md), the [engineering case study](docs/CASE_STUDY.md), or the [executed verification evidence](docs/VERIFICATION.md). The game runs without registration and supplies a bot when no human opponent is available.
 
+For a detailed Windows checklist with commands, manual test cases and publication gates, see the [Spanish validation and publication guide](docs/GUIA_PUBLICACION.md). Its optional `compose.acceptance.yaml` uses separate local ports and supports a second API for load tests.
+
 The project is intended as an inspectable portfolio demo. Its strongest evidence is the combination of playable flows, real database contention tests and completed matches across two API instances. A public demo URL, remote CI run and container validation are still pending; those are not implied by the screenshots or local test results.
 
 ## Run it

@@ -16,6 +16,7 @@ Verified locally on 5 November 2026. These are executed checks, rather than an e
 | Browser rendering | Desktop and mobile captures; no page JavaScript errors or horizontal overflow at 390px |
 | Runtime logs after final startup/load | No API runtime errors |
 | `git diff --check` | Passed |
+| Acceptance Compose configuration | Official standalone Compose 5.7.0 parsed both files; replacement ports 3100/3101/3102, load profile and browser API build URL checked. Containers not started. |
 
 The load figures include complete match duration, including animation pauses and occasional sudden death. They are small smoke runs on one workstation, not a saturation benchmark or a latency SLA. JSON summaries are saved as [single-instance results](load-smoke.json) and [two-instance results](load-two-instances.json).
 
@@ -23,7 +24,7 @@ Local execution used Node 24.17, PostgreSQL 18 and a Redis 8.10 Windows build in
 
 ## Not executed here
 
-- Docker Engine/Compose are not installed on this host. The Compose file, migration job, multi-stage images and CI image-build step are provided; image builds and `docker compose up --build` still need execution on a Docker host.
+- Docker Engine/Desktop is not installed on this host. A standalone Compose CLI was used only to validate configuration. The migration job, multi-stage images and CI image-build step are provided; image builds and `docker compose up --build` still need execution on a Docker host.
 - GitHub Actions has not run remotely; this repository is local and has not been pushed.
 - Sentry instrumentation builds and initializes, with reporting disabled when no DSN is configured. No real event ingestion was tested.
 - A broad accessibility audit, Lighthouse benchmark, network partition test and failover under sustained load have not been performed.
