@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: spotkick
+      POSTGRES_USER: spotkick
+      POSTGRES_PASSWORD: spotkick
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U spotkick]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7.4-alpine
+    command: [redis-server, --appendonly, 'yes']
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile
+      target: api
+    command: [node, apps/api/dist/migrate.js]
+    environment:
+      DATABASE_URL: postgres://spotkick:spotkick@postgres:5432/spotkick
+    depends_on:
+      postgres:
+        condition: service_healthy
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile
+      target: api
+    environment:
+      DATABASE_URL: postgres://spotkick:spotkick@postgres:5432/spotkick
+      REDIS_URL: redis://redis:6379
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      BOT_AFTER_MS: ${BOT_AFTER_MS:-5000}
+      RAKE_BPS: ${RAKE_BPS:-300}
+      CHOICE_MS: ${CHOICE_MS:-10000}
+      REVEAL_MS: ${REVEAL_MS:-3000}
+      RESULT_MS: ${RESULT_MS:-1600}
+      GUEST_RATE_LIMIT: ${GUEST_RATE_LIMIT:-30}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    ports:
+      - '3001:3001'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile
+      target: web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+    environment:
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    ports:
+      - '3000:3000'
+    depends_on:
+      api:
+        condition: service_healthy
+volumes:
+  postgres_data:
+  redis_data:

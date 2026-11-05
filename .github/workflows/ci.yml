@@ -1,0 +1,56 @@
+name: SpotKick CI
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env: {POSTGRES_DB: spotkick, POSTGRES_USER: spotkick, POSTGRES_PASSWORD: spotkick}
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U spotkick" --health-interval 3s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports: ['6379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://spotkick:spotkick@localhost:5432/spotkick
+      REDIS_URL: redis://localhost:6379
+      WEB_ORIGIN: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      BOT_AFTER_MS: 500
+      RESULT_MS: 150
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: npm install --global pnpm@11.25.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm typecheck
+      - run: pnpm test:integration
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Start production apps
+        run: |
+          node apps/api/dist/main.js > /tmp/spotkick-api.log 2>&1 &
+          pnpm --filter @spotkick/web start > /tmp/spotkick-web.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3001/health && curl -fsS http://localhost:3000 > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/spotkick-api.log /tmp/spotkick-web.log
+          exit 1
+      - run: pnpm test:e2e
+      - name: Build Compose targets
+        run: docker compose build
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-failure
+          path: |
+            playwright-report/
+            test-results/
+            /tmp/spotkick-api.log
+            /tmp/spotkick-web.log

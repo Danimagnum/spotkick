@@ -1,0 +1,2 @@
+import { defineConfig, devices } from '@playwright/test';
+export default defineConfig({ testDir: './tests/e2e', timeout: 240000, expect: { timeout: 15000 }, fullyParallel: false, workers: 1, reporter: [['list'], ['html', { open: 'never' }]], use: { baseURL: process.env.WEB_URL || 'http://localhost:3000', trace: 'retain-on-failure', screenshot: 'only-on-failure' }, projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) } }] });

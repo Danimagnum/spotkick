@@ -1,5 +1,7 @@
 {
-  "name": "spotkick", "private": true, "version": "0.1.0",
+  "name": "spotkick",
+  "private": true,
+  "version": "0.1.0",
   "packageManager": "pnpm@11.25.0",
   "scripts": {
     "build": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/api build && pnpm --filter @spotkick/web build",
@@ -11,5 +13,11 @@
     "dev:web": "pnpm --filter @spotkick/web dev",
     "db:migrate": "pnpm --filter @spotkick/api migrate"
   },
-  "devDependencies": { "@playwright/test": "^1.58.0", "@types/node": "^22.0.0", "typescript": "^5.9.3", "vitest": "^3.2.4", "tsx": "^4.21.0" }
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "tsx": "^4.21.0"
+  }
 }
