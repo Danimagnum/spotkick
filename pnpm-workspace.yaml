@@ -1,0 +1,8 @@
+packages:
+  - apps/*
+  - packages/*
+allowBuilds:
+  '@sentry/cli': true
+  esbuild: true
+  '@nestjs/core': true
+  sharp: true
