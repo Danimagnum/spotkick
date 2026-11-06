@@ -274,3 +274,7 @@ infra/docker/        Multi-stage API/web builds
 ```
 
 Implementation references: [NestJS Redis adapter](https://docs.nestjs.com/websockets/adapter), [Socket.IO adapters](https://socket.io/docs/v4/adapter/), [TypeORM migrations](https://typeorm.io/docs/migrations/setup/), [Next.js 15 instrumentation](https://nextjs.org/blog/next-15), [pnpm 11 build policy](https://pnpm.io/blog/releases/11.0).
+
+## Portfolio hosting
+
+Public source: [Danimagnum/spotkick](https://github.com/Danimagnum/spotkick). For the existing DS918+, see [Synology deployment](docs/SYNOLOGY.md). A generic production overlay is also documented in [deployment preparation](docs/DEPLOYMENT.md). Public DNS, NAS access and external acceptance are pending; no live public demo is claimed yet.

@@ -1,0 +1,26 @@
+# Combine with compose.yaml. HTTPS reverse proxy runs on the deployment host.
+# Requires Compose 2.24.4+ (!override).
+services:
+  postgres:
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a unique production database password}
+  redis:
+    restart: unless-stopped
+  migrate:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set the production PostgreSQL URL}
+  api:
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set the production PostgreSQL URL}
+      WEB_ORIGIN: ${WEB_ORIGIN:?Set the HTTPS web origin}
+    ports: !override
+      - '127.0.0.1:${API_HOST_PORT:-3301}:3001'
+  web:
+    restart: unless-stopped
+    build:
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Set the public HTTPS API origin}
+    ports: !override
+      - '127.0.0.1:${WEB_HOST_PORT:-3300}:3000'

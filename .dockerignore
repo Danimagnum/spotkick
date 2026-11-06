@@ -3,6 +3,7 @@
 **/dist
 .git
 .env
+.env.*
 test-results
 playwright-report
 work
