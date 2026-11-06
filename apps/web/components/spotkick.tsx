@@ -35,6 +35,41 @@ export function SpotKick({ initialMode }: {
         hash: string;
     } | null>(null), [clientSeed, setClientSeed] = useState('my-first-kick'), [now, setNow] = useState(Date.now()), [selected, setSelected] = useState<Zone>(), [modal, setModal] = useState<'rules' | 'wallet' | null>(null), [journal, setJournal] = useState<any[]>([]), [queueStarted, setQueueStarted] = useState(0);
     const socket = useRef<Socket | null>(null), meRef = useRef<Me | null>(null), matchRef = useRef<MatchView | null>(null), revealing = useRef(''), mounted = useRef(true), refreshSeq = useRef(0);
+    const modalTrigger = useRef<HTMLElement | null>(null);
+    const openModal = (next: 'rules' | 'wallet') => {
+        modalTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        setModal(next);
+    };
+    useEffect(() => {
+        if (!modal) return;
+        const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+        if (!dialog) return;
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                setModal(null);
+                return;
+            }
+            if (event.key !== 'Tab') return;
+            const controls = Array.from(dialog.querySelectorAll<HTMLElement>(
+                'button:not([disabled]),a[href],input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])'
+            )).filter(control => control.getClientRects().length > 0);
+            const first = controls[0], last = controls.at(-1);
+            const outside = !dialog.contains(document.activeElement);
+            if (event.shiftKey && (document.activeElement === first || outside)) {
+                event.preventDefault();
+                last?.focus();
+            } else if (!event.shiftKey && (document.activeElement === last || outside)) {
+                event.preventDefault();
+                first?.focus();
+            }
+        };
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.removeEventListener('keydown', onKeyDown);
+            if (modalTrigger.current?.isConnected) modalTrigger.current.focus();
+        };
+    }, [modal]);
     const acceptMatch = useCallback((next: MatchView) => { setMatch(old => { if (old?.id === next.id && old.version > next.version)
         return old; matchRef.current = next; return next; }); setQueued(false); }, []);
     const call = useCallback(<T,>(event: string, data: unknown) => new Promise<T>((resolve, reject) => { if (!socket.current?.connected)
@@ -142,9 +177,9 @@ export function SpotKick({ initialMode }: {
     const result = inMatch && (match.phase === 'RESOLVED' || finished) ? match.results.at(-1) : undefined;
     const soloResult = mode === 'solo' ? solo?.history.at(-1) : undefined;
     const countdown = match ? Math.max(0, Math.ceil((match.deadline - now) / 1000)) : 10;
-    const openWallet = () => { setModal('wallet'); void request('/wallet').then(setJournal).catch(e => setError(e.message)); };
+    const openWallet = () => { openModal('wallet'); void request('/wallet').then(setJournal).catch(e => setError(e.message)); };
     return <div className="app-shell">
-    <header className="site-header"><a className="brand" href="/" aria-label="SpotKick home"><span className="brand-mark"><Ball size={27}/></span>spotkick<span className="brand-period">.</span></a><nav aria-label="Main navigation"><a href="/" className={mode === 'arena' ? 'active' : ''}>Arena</a><a href="/solo" className={mode === 'solo' ? 'active' : ''}>Solo run</a><button onClick={() => setModal('rules')}>How to play</button><a href="/verify" className={mode === 'verify' ? 'active' : ''}>Fairness <Icon name="shield" size={14}/></a></nav><div className="header-account"><span className="demo-tag">Play money</span><button className="wallet-button" onClick={openWallet} aria-label="View wallet ledger"><span className="coin">S</span><b data-testid="balance">{me ? money(me.balance) : '—'}</b><Icon name="wallet" size={17}/></button><span className="avatar header-avatar">{me?.name.slice(-2) || 'SK'}</span></div></header>
+    <header className="site-header"><a className="brand" href="/" aria-label="SpotKick home"><span className="brand-mark"><Ball size={27}/></span>spotkick<span className="brand-period">.</span></a><nav aria-label="Main navigation"><a href="/" className={mode === 'arena' ? 'active' : ''}>Arena</a><a href="/solo" className={mode === 'solo' ? 'active' : ''}>Solo run</a><button onClick={() => openModal('rules')}>How to play</button><a href="/verify" className={mode === 'verify' ? 'active' : ''}>Fairness <Icon name="shield" size={14}/></a></nav><div className="header-account"><span className="demo-tag">Play money</span><button className="wallet-button" onClick={openWallet} aria-label="View wallet ledger"><span className="coin">S</span><b data-testid="balance">{me ? money(me.balance) : '—'}</b><Icon name="wallet" size={17}/></button><span className="avatar header-avatar">{me?.name.slice(-2) || 'SK'}</span></div></header>
     <main>
       <div className="status-strip"><span><i className={`status-dot ${connected ? 'on' : ''}`}/>{connected ? 'Arena connected' : 'Connecting to arena'}<span className="status-divider"/> <span>{lobby.online.length} online</span></span><span className="status-fair"><Icon name="shield" size={14}/> Play money only. Take breaks.</span></div>
       {error && <div className="error-banner" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><Icon name="close" size={16}/></button></div>}
@@ -162,7 +197,7 @@ export function SpotKick({ initialMode }: {
       <section className="lobby-section"><div className="section-heading"><h2>On the touchline <span className="count-badge">{lobby.online.length}</span></h2><span><span className="tiny-dot"/>{lobby.matches} {lobby.matches === 1 ? 'match' : 'matches'} in play</span></div><div className="lobby-columns"><div className="players-list">{lobby.online.length ? lobby.online.slice(0, 6).map((p, i) => <div className="player-row" key={p.id}><span className={`avatar color-${i % 3}`}>{p.name.slice(-2)}</span><div><b>{p.id === me?.id ? 'You' : p.name}</b><small>{p.id === me?.id ? 'Ready for your moment' : 'On the touchline'}</small></div><span className="online-dot"/></div>) : <p className="empty-state">The lights are on. Connect to join the touchline.</p>}</div><div className="recent-list"><h3><Icon name="cup" size={16}/> Recent final whistles</h3>{lobby.recent.length ? lobby.recent.slice(0, 4).map(r => <div key={r.id}><span>{r.winner}</span><span>{r.score.join(' : ')}</span><strong>+{money(r.payout)} S</strong></div>) : <p className="empty-state">The first result could be yours.<br />Completed matches appear here live.</p>}</div></div></section>
       </>}
       <div className="responsible-notice"><Icon name="shield" size={21}/><p><strong>Keep it a game.</strong> Play money only. No purchases, withdrawals or cash value. Take breaks and play responsibly.</p><span>Just for the love of the game.</span></div>
-    </main><footer><a className="brand footer-brand" href="/">spotkick.</a><span>Every choice counts.</span><button onClick={() => setModal('rules')}>Game rules</button><a href="/verify">Fairness verifier</a><small>An original real-time multiplayer demo</small></footer>
+    </main><footer><a className="brand footer-brand" href="/">spotkick.</a><span>Every choice counts.</span><button onClick={() => openModal('rules')}>Game rules</button><a href="/verify">Fairness verifier</a><small>An original real-time multiplayer demo</small></footer>
     {modal && <div className="modal-backdrop" onClick={() => setModal(null)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" onClick={e => e.stopPropagation()}><button className="modal-close" onClick={() => setModal(null)} aria-label="Close dialog" autoFocus><Icon name="close"/></button><h2 id="modal-title">{modal === 'rules' ? 'Six kicks. All the drama.' : 'Your play-money ledger'}</h2>{modal === 'rules' ? <><p>Both players stake the same amount. In each of three rounds, you shoot once and keep goal once.</p><ol><li>Choose left, centre or right. A matching keeper choice saves the shot.</li><li>Goals earn 1 point in round 1, 2 in round 2 and 3 in round 3.</li><li>A tie enters sudden death. Both players finish their shot before a winner is decided.</li><li>You have 10 seconds to choose. A timeout uses an auditable random zone.</li><li>The winner receives the pot minus the configured arena fee, 3% by default.</li></ol><p>Solo mode: score to grow your payout, then cash out or keep shooting. A save loses your stake. The multiplier after k goals is 0.99 × 1.5ᵏ.</p><p className="control-hint">Guest sessions start with 1,000 S. These credits have no cash value. Preserve your browser’s session to keep your wallet.</p></> : <><p>Every movement is recorded. Balance: <b>{me ? money(me.balance) : '—'} S</b></p><div className="journal">{journal.map((e, i) => <div key={i}><span>{e.operation.replaceAll('_', ' ').toLowerCase()}<small>{new Date(e.created_at).toLocaleString()}</small></span><b className={BigInt(e.amount) > 0 ? 'positive' : ''}>{BigInt(e.amount) > 0 ? '+' : ''}{money(Number(e.amount))} S</b></div>)}</div></>}</section></div>}
   </div>;
 }

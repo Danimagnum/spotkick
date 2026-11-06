@@ -26,4 +26,9 @@ test('a guest plays a full bot match, reloads, verifies fairness and sees settle
     await page.getByRole('button', { name: 'View wallet ledger' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByText(/^stakes locked/)).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Close dialog', exact: true })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toBeHidden();
+    await expect(page.getByRole('button', { name: 'View wallet ledger' })).toBeFocused();
 });
