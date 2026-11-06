@@ -1,8 +1,12 @@
 name: SpotKick CI
 on: [push, pull_request]
+concurrency:
+  group: spotkick-ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:17-alpine
@@ -21,6 +25,7 @@ jobs:
       BOT_AFTER_MS: 500
       RESULT_MS: 150
       NEXT_TELEMETRY_DISABLED: 1
+      PLAYWRIGHT_CHANNEL: chrome
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -31,7 +36,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test:integration
       - run: pnpm build
-      - run: pnpm exec playwright install --with-deps chromium
+      - name: Check preinstalled Chrome
+        run: google-chrome --version
       - name: Start production apps
         run: |
           node apps/api/dist/main.js > /tmp/spotkick-api.log 2>&1 &
