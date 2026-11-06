@@ -1,6 +1,6 @@
 # SpotKick: pasos para validar y publicar la demo del portfolio
 
-Esta guía está escrita para PowerShell en Windows y el repositorio entregado. Incluye acciones que debes ejecutar tú; no afirma que Docker, el despliegue o GitHub Actions ya se hayan validado.
+Esta guía está escrita para PowerShell en Windows y el repositorio entregado. El build y las pruebas locales con Docker ya se han ejecutado; consulta los resultados en [VERIFICATION.md](VERIFICATION.md). El despliegue público y GitHub Actions remoto siguen pendientes.
 
 El objetivo es una demo que un equipo de ingeniería pueda abrir, jugar y revisar. El orden es: entorno reproducible → pruebas automáticas → pruebas manuales → repositorio público/CI → despliegue → presentación.
 
@@ -64,7 +64,9 @@ pnpm exec playwright install chromium
 
 ## 3. Arranca una instalación Docker separada
 
-He incluido `compose.acceptance.yaml`. Usa puertos **3100/3101**, un nombre de proyecto propio y volúmenes independientes de la demo normal. No modifica los puertos 3000/3001 del Compose original. La API secundaria del perfil de carga usa 3102.
+He incluido `compose.acceptance.yaml`. Usa puertos **3180/3101**, un nombre de proyecto propio y volúmenes independientes de la demo normal. No modifica los puertos 3000/3001 del Compose original. La API secundaria del perfil de carga usa 3102.
+
+La web usa 3180 para evitar el servicio que ya ocupa 3100 en esta máquina. Abre exactamente `http://127.0.0.1:3180`, el origen permitido por CORS. Si cambias el puerto, configura también `SPOTKICK_WEB_PORT` y `SPOTKICK_WEB_ORIGIN` con el mismo origen y vuelve a crear los servicios.
 
 En la misma ventana de PowerShell:
 
@@ -113,9 +115,9 @@ Comprueba:
 Después:
 
 ```powershell
-Invoke-RestMethod 'http://localhost:3101/health'
-(Invoke-WebRequest 'http://localhost:3100' -Method Head).StatusCode
-Start-Process 'http://localhost:3100'
+Invoke-RestMethod 'http://127.0.0.1:3101/health'
+(Invoke-WebRequest 'http://127.0.0.1:3180' -Method Head).StatusCode
+Start-Process 'http://127.0.0.1:3180'
 ```
 
 **Resultado esperado:** health devuelve `ok: true`, la web responde 200 y el navegador conecta al arena. Si falla un puerto, identifica qué aplicación lo ocupa; no cierres procesos que no hayas identificado.
@@ -128,7 +130,7 @@ docker compose logs --follow api web
 
 Usa una segunda terminal con las variables de Compose repetidas. Ctrl+C sale del seguimiento de logs; los contenedores iniciados con `-d` siguen funcionando.
 
-**Punto de control:** aquí validas por primera vez el empaquetado Linux/Docker, que estaba pendiente. La preview nativa de Windows por sí sola no demuestra que estas imágenes funcionen.
+**Punto de control:** esto valida el empaquetado Linux/Docker en tu instalación. Las imágenes, migraciones y arranque ya se probaron localmente el 6 de noviembre de 2026; repetirlo en el host final sigue siendo parte de la publicación.
 
 ## 4. Ejecuta las comprobaciones automáticas
 
@@ -187,17 +189,19 @@ Un test que falla por conexión, timeout o falta de recursos **no** cuenta como 
 Mantén la API/web de aceptación en marcha y configura el navegador de prueba:
 
 ```powershell
-$env:WEB_URL = 'http://localhost:3100'
+$env:WEB_URL = 'http://127.0.0.1:3180'
+$env:API_URL = 'http://127.0.0.1:3101'
 Remove-Item Env:PLAYWRIGHT_CHANNEL -ErrorAction SilentlyContinue
 pnpm test:e2e
 ```
 
 Eliminar esa variable solo selecciona el Chromium que acabas de instalar. No borra archivos. Si prefieres Chrome instalado, puedes usar `$env:PLAYWRIGHT_CHANNEL = 'chrome'`.
 
-**Resultado esperado actual:** 2 tests aprobados:
+**Resultado esperado actual:** 3 tests aprobados:
 
 1. Partida completa contra bot, recarga, verificación del transcript, saldo liquidado y journal.
 2. Disparo de solo, fin de sesión/cash-out cuando corresponde y verificación en navegador.
+3. PvP con dos invitados autenticados (navegador y cliente HTTP): compromiso pendiente conservado tras recarga, seis intercambios, pago de 48,50 S y saldos de ambos participantes.
 
 No ejecutes k6 ni pongas otros humanos en cola mientras se prueba el bot: podrían emparejarse con el invitado del test. La duración varía por muerte súbita.
 
@@ -415,7 +419,7 @@ La configuración de aceptación eleva el límite de creación de invitados solo
 
 ```powershell
 New-Item -ItemType Directory -Force test-results | Out-Null
-k6 run -e API_URL=http://localhost:3101 -e VUS=4 -e DURATION=1s --summary-export test-results/k6-smoke.json tests/load/matches.js
+k6 run -e API_URL=http://127.0.0.1:3101 -e VUS=4 -e DURATION=1s --summary-export test-results/k6-smoke.json tests/load/matches.js
 ```
 
 `DURATION=1s` inicia las iteraciones durante un segundo; la finalización de partidos continúa durante el periodo de gracia. No significa que una partida dure un segundo.
@@ -429,13 +433,13 @@ En la terminal con las variables Compose configuradas:
 ```powershell
 docker compose --profile load up -d --build api2
 docker compose --profile load ps
-Invoke-RestMethod 'http://localhost:3102/health'
+Invoke-RestMethod 'http://127.0.0.1:3102/health'
 ```
 
 Después:
 
 ```powershell
-k6 run -e API_URLS=http://localhost:3101,http://localhost:3102 -e VUS=12 -e DURATION=1s --summary-export test-results/k6-two-apis.json tests/load/matches.js
+k6 run -e API_URLS=http://127.0.0.1:3101,http://127.0.0.1:3102 -e VUS=12 -e DURATION=1s --summary-export test-results/k6-two-apis.json tests/load/matches.js
 ```
 
 **Esperado:** los doce jugadores completan y cada wallet coincide con su liquidación. Como los clientes se reparten entre instancias, esto ejercita la coordinación compartida y los broadcasts mediante Redis.
@@ -453,7 +457,7 @@ Ese p95 mide el partido completo, con animación y muerte súbita. No lo publiqu
 Si los smokes pasan, prueba diez jugadores durante un minuto:
 
 ```powershell
-k6 run -e API_URLS=http://localhost:3101,http://localhost:3102 -e VUS=10 -e DURATION=1m --summary-export test-results/k6-one-minute.json tests/load/matches.js
+k6 run -e API_URLS=http://127.0.0.1:3101,http://127.0.0.1:3102 -e VUS=10 -e DURATION=1m --summary-export test-results/k6-one-minute.json tests/load/matches.js
 ```
 
 En otra terminal con el mismo contexto Compose:

@@ -51,12 +51,12 @@ These mechanisms prove specific consistency properties. They do not prove that a
 ## Executed results
 
 - Seven unit tests and six PostgreSQL/Redis integration tests passed locally.
-- Two Playwright flows passed: full bot match/reload/settlement/transcript and solo settlement/browser verification.
+- Three Playwright flows passed: full bot match/reload/settlement/transcript, pending PvP commitment recovery against an authenticated HTTP rival, and solo settlement/browser verification.
 - A 12-player k6 smoke run split connections across two API processes. All players completed, all wallet checks passed and no HTTP requests failed.
 - The two-process run's p95 complete-match duration was 22.63 seconds. It includes gameplay and is not an API latency measurement or proof of production capacity.
 - API and Next.js production builds and TypeScript checks passed.
 
-See [verification evidence](VERIFICATION.md) and its saved metric summaries for execution details and untested items. Docker execution, remote CI and live Sentry ingestion are not claimed as verified.
+See [verification evidence](VERIFICATION.md) and its saved metric summaries for execution details and untested items. Docker builds, startup and two-instance load passed locally. Remote CI and live Sentry ingestion remain unverified.
 
 ## Source tour
 

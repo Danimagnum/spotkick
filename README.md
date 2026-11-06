@@ -209,7 +209,7 @@ On a machine with Chrome installed, `PLAYWRIGHT_CHANNEL=chrome pnpm test:e2e` av
 
 Integration coverage includes **100 concurrent bets against a single wallet**, then **100 concurrent settlement calls including duplicates**. It asserts the exact accepted-bet count, conservation, nonnegative spendable accounts, zero settled escrows and exactly-once payouts. Additional cases exercise database immutability/sealing, invalid reveals, all six exchanges, terminal replays, reconnect snapshots, the Redis bot queue, timeout fallback, refunds, solo reservation, duplicated concurrent shots/cash-outs and independent Node HMAC reproduction.
 
-Playwright plays a full match against a bot, reloads mid-match, verifies the public transcript, checks the final wallet and opens the journal. A second test exercises solo settlement and browser verification. GitHub Actions provisions PostgreSQL/Redis, runs checks and production builds, runs Playwright, and builds both Compose image targets. Failed browser runs upload traces and screenshots.
+Playwright plays a full match against a bot, reloads mid-match, verifies the public transcript, checks the final wallet and opens the journal. A second test exercises solo settlement and browser verification. A third uses a browser and an authenticated HTTP rival to verify pending-commitment recovery, all six exchanges and both settled wallets. GitHub Actions provisions PostgreSQL/Redis, runs checks and production builds, runs Playwright, and builds both Compose image targets. Failed browser runs upload traces and screenshots.
 
 ### k6
 
@@ -258,7 +258,7 @@ This is an engineering MVP. Next work: registered identities and recovery, trans
 
 The API database role currently owns its schema so automatic migrations can run. A hardened deployment should separate migration ownership from a restricted runtime role. Database administrators can always disable triggers; database controls are not protection against the operator itself. Browser tokens use localStorage for demo simplicity; authenticated production would warrant a reviewed session and XSS model.
 
-The Docker images favor understandable source/dependency packaging over minimum size (the API image includes the build workspace). Docker/Compose should be validated on the target host; see [verification evidence](docs/VERIFICATION.md) for what was actually run in this environment.
+The Docker images favor understandable source/dependency packaging over minimum size (the API image includes the build workspace). Production Docker builds and local container acceptance passed; repeat acceptance on the deployment host; see [verification evidence](docs/VERIFICATION.md) for what was actually run in this environment.
 
 ## Layout
 

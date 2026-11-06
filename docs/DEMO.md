@@ -4,7 +4,7 @@ Use this walkthrough for a portfolio review, screen recording or interview. Outc
 
 ## Before the walkthrough
 
-Run `docker compose up --build` on a Docker host and open http://localhost:3000. Container execution has not yet been verified on the development workstation; see [verification evidence](VERIFICATION.md). If the local apps are already running, use their existing URL.
+Run `docker compose up --build` on a Docker host and open http://localhost:3000. Production containers have been built and exercised locally; see [verification evidence](VERIFICATION.md). The isolated Windows acceptance stack is at http://127.0.0.1:3180. If the local apps are already running, use their existing URL.
 
 Use a fresh browser profile for a clean 1,000 S guest wallet. No registration, payment details, cloud key or Sentry account is required. Keep the visible play-money/responsible-gaming notice in view when presenting the product.
 
@@ -67,7 +67,7 @@ Open two independent browser profiles, choose the same stake, and queue both wit
 - [x] Bot fallback for reviewers arriving alone.
 - [x] Visible play-money and responsible-gaming notices.
 - [x] Source, architecture diagrams, repeatable test commands and local evidence.
-- [ ] Validate a clean Docker build and startup on the target host.
+- [x] Build production Docker images and validate startup locally. Repeat on the final deployment host.
 - [ ] Publish the repository and obtain a successful remote CI run.
 - [ ] Add a public HTTPS/WSS demo URL and verify it from another device.
 - [ ] Record a short walkthrough from the deployed version.
