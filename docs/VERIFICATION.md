@@ -24,7 +24,7 @@ Initial native execution used Node 24.17, PostgreSQL 18 and Redis 8.10. On 6 Nov
 
 ## Not executed here
 
-- GitHub Actions has not run remotely; this repository is local and has not been pushed.
+- Public NAS deployment, DNS/certificates and external-device acceptance are not executed yet.
 - Sentry instrumentation builds and initializes, with reporting disabled when no DSN is configured. No real event ingestion was tested.
 - A broad accessibility audit, Lighthouse benchmark, network partition test and failover under sustained load have not been performed.
 
@@ -46,3 +46,7 @@ All screenshots come from the running application with real API/Redis/PostgreSQL
 Final Docker browser suite: **3/3 Playwright tests passed** (bot/reload/ledger/keyboard; browser plus HTTP rival with pending commitment and both payouts; solo/browser verification). The PvP recovery case completed in 16.7 seconds. Desktop and mobile captures were refreshed from the Docker web app with no page errors or horizontal overflow. Final SQL audit: journal sum 0, zero unbalanced transactions, zero negative spendable accounts.
 
 Restart check: restarted only the acceptance API and Redis; the same authenticated guest recovered with its unchanged 100,000-unit balance. This checks process recovery and wallet persistence, not a network-partition or sustained-load failover guarantee.
+
+## Remote CI, 6 November
+
+Repository published at [Danimagnum/spotkick](https://github.com/Danimagnum/spotkick). [GitHub Actions run 42255301988](https://github.com/Danimagnum/spotkick/actions/runs/42255301988) passed for code commit a7dae35: frozen installation, unit tests, TypeScript, PostgreSQL/Redis integration tests, production builds, all three Playwright tests and both Docker targets. Two earlier runs were cancelled after the browser-download step stalled; CI now uses the Chrome already installed on the Ubuntu 24.04 runner.

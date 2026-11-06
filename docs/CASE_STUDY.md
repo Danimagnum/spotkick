@@ -56,7 +56,7 @@ These mechanisms prove specific consistency properties. They do not prove that a
 - The two-process run's p95 complete-match duration was 22.63 seconds. It includes gameplay and is not an API latency measurement or proof of production capacity.
 - API and Next.js production builds and TypeScript checks passed.
 
-See [verification evidence](VERIFICATION.md) and its saved metric summaries for execution details and untested items. Docker builds, startup and two-instance load passed locally. Remote CI and live Sentry ingestion remain unverified.
+See [verification evidence](VERIFICATION.md) and its saved metric summaries for execution details and untested items. Docker builds, startup and two-instance load passed locally. Remote CI passed, including Playwright and Docker builds; live Sentry ingestion remains unverified.
 
 ## Source tour
 

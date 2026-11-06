@@ -68,7 +68,7 @@ Open two independent browser profiles, choose the same stake, and queue both wit
 - [x] Visible play-money and responsible-gaming notices.
 - [x] Source, architecture diagrams, repeatable test commands and local evidence.
 - [x] Build production Docker images and validate startup locally. Repeat on the final deployment host.
-- [ ] Publish the repository and obtain a successful remote CI run.
+- [x] Publish the repository and obtain a successful remote CI run.
 - [ ] Add a public HTTPS/WSS demo URL and verify it from another device.
 - [ ] Record a short walkthrough from the deployed version.
 - [ ] If Sentry is enabled for the demo, verify a test event reaches the project.
