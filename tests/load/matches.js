@@ -1,13 +1,21 @@
 import http from 'k6/http';
 import ws from 'k6/ws';
 import crypto from 'k6/crypto';
-import { check } from 'k6';
+import { check,fail } from 'k6';
 import { Rate,Trend } from 'k6/metrics';
 
 export const options={scenarios:{shootouts:{executor:'constant-vus',vus:Number(__ENV.VUS||10),duration:__ENV.DURATION||'1m',gracefulStop:'3m'}},thresholds:{match_success:['rate>0.95'],match_duration:['p(95)<150000'],http_req_failed:['rate<0.01']}};
 const success=new Rate('match_success'),duration=new Trend('match_duration',true);
 const endpoints=(__ENV.API_URLS||__ENV.API_URL||'http://localhost:3001').split(',');
 const zones=['left','centre','right'];
+export function setup(){
+  for(const endpoint of endpoints){
+    const response=http.get(`${endpoint}/health`,{timeout:'10s',tags:{phase:'readiness'}});
+    let healthy=false;
+    if(response.status===200){try{healthy=response.json().ok===true;}catch{}}
+    if(!healthy)fail(`API not ready at ${endpoint}; wait for healthy services before starting load`);
+  }
+}
 function hex(buffer){return Array.from(new Uint8Array(buffer),n=>n.toString(16).padStart(2,'0')).join('');}
 // k6 implements the small Engine.IO v4 / Socket.IO event envelope here. No npm adapter.
 export default function(){

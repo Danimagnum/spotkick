@@ -5,11 +5,11 @@ services:
     ports: !override
       - '127.0.0.1:3101:3001'
     environment:
-      WEB_ORIGIN: http://localhost:3100
+      WEB_ORIGIN: ${SPOTKICK_WEB_ORIGIN:-http://127.0.0.1:3180}
       GUEST_RATE_LIMIT: '2000'
   web:
     ports: !override
-      - '127.0.0.1:3100:3000'
+      - '127.0.0.1:${SPOTKICK_WEB_PORT:-3180}:3000'
     build:
       args:
         NEXT_PUBLIC_API_URL: http://localhost:3101
@@ -22,7 +22,7 @@ services:
     environment:
       DATABASE_URL: postgres://spotkick:spotkick@postgres:5432/spotkick
       REDIS_URL: redis://redis:6379
-      WEB_ORIGIN: http://localhost:3100
+      WEB_ORIGIN: ${SPOTKICK_WEB_ORIGIN:-http://127.0.0.1:3180}
       BOT_AFTER_MS: ${BOT_AFTER_MS:-5000}
       RAKE_BPS: ${RAKE_BPS:-300}
       CHOICE_MS: ${CHOICE_MS:-10000}
