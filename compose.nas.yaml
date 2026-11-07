@@ -3,6 +3,8 @@
 services:
   postgres:
     image: postgres:17-alpine
+    network_mode: service:redis
+    command: [postgres, -c, listen_addresses=127.0.0.1]
     restart: unless-stopped
     environment:
       POSTGRES_DB: spotkick
@@ -11,14 +13,17 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [CMD-SHELL, pg_isready -U spotkick]
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, spotkick]
       interval: 5s
       timeout: 3s
       retries: 30
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
-    command: [redis-server, --appendonly, 'yes']
+    command: [redis-server, --bind, 127.0.0.1, --appendonly, 'yes']
+    ports:
+      - '127.0.0.1:${API_HOST_PORT:-3301}:3001'
+      - '127.0.0.1:${WEB_HOST_PORT:-3300}:3000'
     volumes:
       - redis_data:/data
     healthcheck:
@@ -28,10 +33,11 @@ services:
       retries: 30
   api:
     image: spotkick-api:portfolio
+    network_mode: service:redis
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Set the PostgreSQL URL}
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://spotkick:${POSTGRES_PASSWORD:?Set a database password}@127.0.0.1:5432/spotkick
+      REDIS_URL: redis://127.0.0.1:6379
       WEB_ORIGIN: ${WEB_ORIGIN:?Set the HTTPS web origin}
       BOT_AFTER_MS: ${BOT_AFTER_MS:-5000}
       CHOICE_MS: ${CHOICE_MS:-10000}
@@ -40,8 +46,6 @@ services:
       RAKE_BPS: ${RAKE_BPS:-300}
       GUEST_RATE_LIMIT: ${GUEST_RATE_LIMIT:-30}
       SENTRY_DSN: ${SENTRY_DSN:-}
-    ports:
-      - '127.0.0.1:${API_HOST_PORT:-3301}:3001'
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,11 +58,10 @@ services:
       retries: 30
   web:
     image: spotkick-web:portfolio
+    network_mode: service:redis
     restart: unless-stopped
     environment:
       SENTRY_DSN: ${SENTRY_DSN:-}
-    ports:
-      - '127.0.0.1:${WEB_HOST_PORT:-3300}:3000'
     depends_on:
       api:
         condition: service_healthy

@@ -1,6 +1,6 @@
 # SpotKick en Synology DS918+
 
-Objetivo: aprovechar el NAS existente sin contratar un VPS. El coste adicional de hosting sería cero; siguen existiendo consumo eléctrico, conexión doméstica y límites de disponibilidad. No se ha desplegado todavía en el NAS.
+SpotKick arranca en el Synology DS918+ con Docker 20.10.3 y Compose 1.28.5. Desde el NAS se comprobó que la API responde, el lobby carga, se puede crear una sesión invitada y la web devuelve HTTP 200 en `/`, `/solo` y `/verify`. El proxy, DNS y acceso público siguen pendientes.
 
 Synology incluye el DS918+ entre los modelos compatibles con [Container Manager](https://www.synology.com/en-in/dsm/packages/ContainerManager). Su CPU Intel es x86_64 y la memoria de fábrica es de 4 GB, según la [ficha oficial](https://global.download.synology.com/download/Document/Hardware/DataSheet/DiskStation/18-year/DS918%2B/enu/Synology_DS918_Plus_Data_Sheet_enu.pdf). La capacidad disponible depende de los demás servicios del NAS; todavía hay que comprobarla.
 
@@ -30,7 +30,9 @@ docker compose --env-file .env.production -f compose.nas.yaml up -d
 docker compose --env-file .env.production -f compose.nas.yaml ps
 ```
 
-La API aplica migraciones con bloqueo de PostgreSQL al arrancar. PostgreSQL y Redis tienen volúmenes persistentes y no publican puertos. API y web solo escuchan en loopback del NAS: 3301 y 3300, respectivamente.
+La API aplica migraciones con bloqueo de PostgreSQL al arrancar. En este NAS, Docker resolvía los nombres de Redis y PostgreSQL, pero las conexiones entre contenedores expiraban incluso por IP. El archivo para Synology usa el espacio de red de Redis para que los cuatro servicios se comuniquen por loopback. PostgreSQL y Redis conservan sus volúmenes y escuchan solo dentro de ese espacio. Los únicos puertos publicados en el NAS son 3301 para la API y 3300 para la web, ambos en 127.0.0.1.
+
+Si hay que recrear el contenedor de Redis, baja el proyecto completo con `down` y vuelve a levantarlo con `up -d` para que los demás contenedores se conecten al nuevo espacio de red. Conserva los volúmenes al hacerlo.
 
 ## HTTPS y dominio
 
@@ -51,4 +53,4 @@ No publicar el panel DSM, PostgreSQL ni Redis para servir esta demo. El dominio 
 
 Probar desde datos móviles: certificado, HTTPS/WSS, partida completa contra bot, PvP, recarga con compromiso pendiente, solo y verificador, journal y recuperación tras reiniciar API. Registrar versión DSM, recursos consumidos y resultados en VERIFICATION.md después de ejecutarlo. Preparar y comprobar una copia de PostgreSQL fuera del volumen de la aplicación.
 
-Pendiente: acceso al NAS, comprobación de recursos y red, importación, certificados, DNS y pruebas externas. La configuración local preparada no equivale a una demo pública desplegada.
+Quedan pendientes el proxy HTTPS, los certificados, DNS, una partida desde fuera de la red local y la prueba de recuperación de una copia.
