@@ -122,6 +122,13 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
         const [book] = await coreDb.query(
             "SELECT SUM(amount)::text AS net FROM ledger_entries");
         expect(book.net).toBe('0');
+        const [rake] = await coreDb.query(
+            `SELECT SUM(e.amount)::text AS amount FROM ledger_entries e
+             JOIN ledger_transactions t ON t.id=e.transaction_id JOIN accounts a ON a.id=e.account_id
+             WHERE t.reference=$1 AND t.operation='spotkick:rake' AND a.kind='rake'`,
+            ['spotkick-match:' + id],
+        );
+        expect(rake.amount).toBe('60');
         expect(await coreDb.query("SELECT status FROM holds WHERE reference=$1", ['spotkick-match:' + id])).toEqual([
             { status: 'captured' }, { status: 'captured' },
         ]);
