@@ -26,22 +26,31 @@ export class ErrorFilter implements ExceptionFilter {
 export class ApiController {
     constructor(private identity: Identity, private db: Database, private ledger: Ledger, private engine: MatchEngine, private solo: SoloService, private runtime: Runtime, private redis: RedisService) { }
     private user(auth?: string) { return this.identity.auth(auth?.replace(/^Bearer /, '')); }
+    private demoOnly() {
+        if (this.identity.core.enabled) throw new HttpException('Solo is available in demo mode', 403);
+    }
+    @Get('mode')
+    mode() { return { mode: this.identity.core.enabled ? 'core' : 'demo' }; }
     @Get('health')
     async health() { await this.db.source.query('SELECT 1'); await this.redis.client.ping(); return { ok: true, service: 'spotkick' }; }
     @Post('session')
     async session(
     @Req()
-    req: any) { const key = `spotkick:guest:${req.ip}`; const n = await this.redis.client.incr(key); if (n === 1)
+    req: any, @Body() body: unknown) { const key = `spotkick:guest:${req.ip}`; const n = await this.redis.client.incr(key); if (n === 1)
         await this.redis.client.expire(key, 60); if (n > Number(process.env.GUEST_RATE_LIMIT || 30))
-        throw new HttpException('Too many guest sessions; try again shortly', 429); return this.identity.create(); }
+        throw new HttpException('Too many sessions; try again shortly', 429);
+        if (this.identity.core.enabled)
+            return this.identity.core.login(z.object({ email: z.string().email().max(254), password: z.string().min(1).max(128) }).strict().parse(body));
+        return this.identity.create();
+    }
     @Get('me')
     async me(
     @Headers('authorization')
-    auth?: string) { const u = await this.user(auth); const balance = await this.ledger.balance(this.db.source.manager, `user:${u.id}`); return { ...u, balance: Number(balance) }; }
+    auth?: string) { const u = await this.user(auth); const balance = this.identity.core.enabled ? (await this.identity.core.wallet(u.id)).available : Number(await this.ledger.balance(this.db.source.manager, `user:${u.id}`)); return { ...u, balance }; }
     @Get('wallet')
     async wallet(
     @Headers('authorization')
-    auth?: string) { const u = await this.user(auth); return this.db.source.query('SELECT t.operation,e.amount::text,t.created_at FROM ledger_entries e JOIN ledger_transactions t ON t.id=e.transaction_id WHERE e.account_id=$1 ORDER BY e.id DESC LIMIT 20', [`user:${u.id}`]); }
+    auth?: string) { const u = await this.user(auth); if (this.identity.core.enabled) return (await this.identity.core.wallet(u.id)).movements; return this.db.source.query('SELECT t.operation,e.amount::text,t.created_at FROM ledger_entries e JOIN ledger_transactions t ON t.id=e.transaction_id WHERE e.account_id=$1 ORDER BY e.id DESC LIMIT 20', [`user:${u.id}`]); }
     @Get('lobby')
     lobby() { return this.runtime.lobby(); }
     @Post('queue')
@@ -75,31 +84,31 @@ export class ApiController {
     @Post('solo/seed')
     async seed(
     @Headers('authorization')
-    auth: string) { return this.solo.seed((await this.user(auth)).id); }
+    auth: string) { this.demoOnly(); return this.solo.seed((await this.user(auth)).id); }
     @Post('solo/start')
     async start(
     @Headers('authorization')
     auth: string, 
     @Body()
-    body: unknown) { return this.solo.start((await this.user(auth)).id, soloStartSchema.parse(body)); }
+    body: unknown) { this.demoOnly(); return this.solo.start((await this.user(auth)).id, soloStartSchema.parse(body)); }
     @Post('solo/shoot')
     async shoot(
     @Headers('authorization')
     auth: string, 
     @Body()
-    body: unknown) { return this.solo.action((await this.user(auth)).id, soloActionSchema.parse(body)); }
+    body: unknown) { this.demoOnly(); return this.solo.action((await this.user(auth)).id, soloActionSchema.parse(body)); }
     @Post('solo/cashout')
     async cashout(
     @Headers('authorization')
     auth: string, 
     @Body()
-    body: unknown) { return this.solo.action((await this.user(auth)).id, soloActionSchema.parse(body), true); }
+    body: unknown) { this.demoOnly(); return this.solo.action((await this.user(auth)).id, soloActionSchema.parse(body), true); }
     @Get('solo/:id')
     async soloGet(
     @Headers('authorization')
     auth: string, 
     @Param('id')
-    id: string) { return this.solo.get(idSchema.parse(id), (await this.user(auth)).id); }
+    id: string) { this.demoOnly(); return this.solo.get(idSchema.parse(id), (await this.user(auth)).id); }
 }
 @WebSocketGateway({ cors: { origin: process.env.WEB_ORIGIN || 'http://localhost:3000' }, transports: ['websocket'], maxHttpBufferSize: 8192 })
 export class GameGateway implements OnGatewayInit, OnGatewayConnection {
@@ -119,6 +128,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection {
                     await this.redis.client.expire(key, 2);
                 if (n > 30)
                     throw new Error('Slow down and retry');
+                if (this.identity.core.enabled) await this.identity.core.user(socket.handshake.auth.token);
                 ack({ ok: true, data: await fn(data) });
             }
             catch (e) {
