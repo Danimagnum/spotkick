@@ -10,6 +10,17 @@ test('a guest starts practice directly, reloads, verifies fairness and sees sett
     await page.reload();
     await expect(page.getByTestId('scoreboard')).toBeVisible();
     await expect(page.getByTestId('balance')).toHaveText('990');
+    const replays = new Set<string>();
+    await page.exposeFunction('recordSpotKickReplay', (source: string) => { replays.add(source); });
+    await page.evaluate(() => {
+        document.addEventListener('playing', event => {
+            const player = event.target;
+            if (player instanceof HTMLVideoElement && player.closest('.pixel-field')) {
+                const capture = window as Window & { recordSpotKickReplay(source: string): Promise<void> };
+                void capture.recordSpotKickReplay(new URL(player.currentSrc).pathname);
+            }
+        }, true);
+    });
     for (let i = 0; i < 120; i++) {
         if (await page.getByTestId('match-result').isVisible())
             break;
@@ -19,6 +30,9 @@ test('a guest starts practice directly, reloads, verifies fairness and sees sett
         await page.waitForTimeout(300);
     }
     await expect(page.getByTestId('match-result')).toBeVisible({ timeout: 90000 });
+    await expect.poll(() => Array.from(replays).some(
+        source => /^\/retro\/(left|centre|right)-(left|centre|right)\.mp4$/.test(source),
+    )).toBe(true);
     await page.getByText('Inspect match fairness', { exact: true }).click();
     await page.getByRole('button', { name: 'Verify match transcript' }).click();
     await expect(page.getByText('Verified: seed, commitments and timeout choices match.')).toBeVisible();
