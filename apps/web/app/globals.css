@@ -362,53 +362,6 @@ h1 {
   isolation:isolate;
   border:1px solid #29403f
 }
-.pitch {
-  width:100%;
-  height:auto;
-  display:block
-}
-.pitch-top {
-  position:absolute;
-  top:18px;
-  left:21px;
-  right:21px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  font-size:9px;
-  color:#c1d0cd
-}
-.venue {
-  display:flex;
-  gap:7px;
-  align-items:center;
-  background:#09182088;
-  border:1px solid #9aafa41f;
-  padding:7px 9px;
-  border-radius:4px
-}
-.venue .tiny-dot {
-  width:4px;
-  height:4px
-}
-.weather {
-  font-size:9px;
-  color:#b5c5c7
-}
-.pitch-bottom {
-  position:absolute;
-  bottom:19px;
-  left:21px;
-  right:21px;
-  display:flex;
-  justify-content:space-between;
-  font-size:9px;
-  color:#c3d1c8
-}
-.pitch-bottom>span+span {
-  color:#a3bcb0;
-  font-size:8px
-}
 .arena-caption {
   min-height:66px;
   display:flex;
@@ -1761,28 +1714,6 @@ summary {
   .arena-format svg {
     display:none
   }
-  .pitch-top {
-    top:12px;
-    left:13px;
-    right:13px;
-    font-size:7px
-  }
-  .venue {
-    padding:5px 6px;
-    font-size:7px
-  }
-  .weather {
-    font-size:7px
-  }
-  .pitch-bottom {
-    bottom:12px;
-    left:13px;
-    right:13px;
-    font-size:7px
-  }
-  .pitch-bottom>span+span {
-    display:none
-  }
   .arena-caption {
     padding:14px;
     font-size:9px;
@@ -2027,8 +1958,6 @@ summary {
 .compact-arena .arena-kind {padding-left:7px}
 .compact-arena .arena-format svg {width:12px;height:12px}
 .compact-arena .pitch-wrap {margin:0 6px;border-radius:8px;border-color:#3c5267}
-.lobby-console .pitch-wrap {height:clamp(245px,46vw,354px)}
-.lobby-console .pitch {height:100%}
 .compact-arena .arena-caption {min-height:33px;padding:6px 9px;font-size:10px;gap:7px}
 .compact-arena .arena-caption>div {gap:6px}
 .compact-arena .arena-caption>div svg {width:13px;height:13px}
@@ -2116,47 +2045,38 @@ summary {
 .compact-arena .responsible-notice>span,.compact-arena footer .footer-brand,.compact-arena footer>span {display:none}
 .compact-arena footer {padding:8px 12px;margin-top:4px;gap:10px;font-size:10px;min-height:0}
 
-.pitch-lamp {animation:stadium-light 5.5s ease-in-out infinite alternate}
-.pitch-light-rig + .pitch-light-rig .pitch-lamp {animation-delay:-2s}
-.pitch-keeper-idle {animation:keeper-ready 1.9s ease-in-out infinite alternate}
-.pitch-idle-title {
-  position:absolute;top:60%;left:0;right:0;display:grid;gap:4px;justify-items:center;
-  pointer-events:none;color:#ffdfa0;text-align:center;
-  text-shadow:0 2px 10px #0b2638,0 0 20px #10243f;
+.pitch-wrap {background:#0a2528}
+.pixel-hud {
+  min-height:45px;display:flex;align-items:center;justify-content:space-between;gap:5px;
+  padding:4px 7px;background:#102e3c;border-bottom:2px solid #93b8bc;color:#f4fff1;
+  font-family:ui-monospace,monospace;text-transform:uppercase;
 }
-.pitch-idle-title strong {font-size:clamp(22px,5vw,40px);line-height:1;font-weight:800;letter-spacing:-.04em}
-.pitch-idle-title span {font-size:10px;font-weight:650;color:#d9e8f3}
-.pitch-replay {
-  aspect-ratio:900/530;
-  background-position:center;
-  background-size:cover;
+.pixel-venue {font-size:9px;letter-spacing:.07em}
+.pixel-caption {display:grid;gap:2px;text-align:right;line-height:1.2}
+.pixel-caption strong {font-size:clamp(11px,3vw,16px);letter-spacing:.05em}
+.pixel-caption span {font-size:clamp(8px,2vw,10px)}
+.pixel-caption .pixel-goal {color:#ffe281}
+.pixel-caption .pixel-save {color:#8bf6ff}
+.pixel-field {
+  position:relative;width:100%;max-width:370px;aspect-ratio:1;margin-inline:auto;
+  background:#14552e center/100% 100% no-repeat;image-rendering:pixelated;
 }
-.pitch-replay video {
-  position:absolute;
-  inset:0;
-  width:100%;
-  height:100%;
-  object-fit:cover;
-  pointer-events:none;
+.pixel-field video {
+  position:absolute;inset:0;width:100%;height:100%;pointer-events:none;
 }
-.pitch-result-call {
-  position:absolute;left:0;right:0;top:61%;text-align:center;pointer-events:none;
-  font-size:clamp(26px,7vw,54px);line-height:1;font-weight:800;
-  color:#ffd481;text-shadow:0 3px 0 #112433,0 0 24px #10243f;
+.pixel-zones {
+  position:absolute;top:45%;left:21%;right:21%;display:grid;grid-template-columns:repeat(3,1fr);
+  justify-items:center;pointer-events:none;
 }
-.pitch-result-call.is-save {color:#83ecff}
-.compact-arena .pitch-top {top:7px;left:7px;right:7px}
-.compact-arena .venue {padding:4px 6px}
-.compact-arena .pitch-bottom {bottom:5px;left:7px;right:7px}
-@keyframes stadium-light {from {opacity:.68} to {opacity:1}}
-@keyframes keeper-ready {from {translate:0 0} to {translate:0 -4px}}
-
+.pixel-zones span {
+  padding:1px 4px;background:#0b2630eb;border:2px solid #b6dad8;
+  box-shadow:2px 2px #061b20;color:#f4fff1;font:10px ui-monospace,monospace;
+}
 @media(max-width:620px) {
   .compact-arena .arena-layout:not(.lobby-console) {grid-template-columns:1fr}
 }
 @media(max-width:440px) {
   .compact-arena .lobby-console {grid-template-columns:1fr;grid-template-areas:"pitch" "controls" "activity"}
-  .compact-arena .lobby-console .pitch-wrap {height:clamp(182px,54vw,235px)}
   .console-player-list {max-height:106px}
   .activity-rounds {display:none}
   .console-actions .primary-button,.console-actions .secondary-button {min-height:44px}
@@ -2164,7 +2084,4 @@ summary {
 }
 @media(max-width:355px) {
   .compact-arena .header-account:has(.wallet-button) .console-status {display:none}
-}
-@media(prefers-reduced-motion:reduce) {
-  .pitch-lamp,.pitch-keeper-idle {animation:none}
 }
