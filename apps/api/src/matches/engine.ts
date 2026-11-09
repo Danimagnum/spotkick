@@ -65,6 +65,21 @@ export class MatchEngine {
         return { queued: true, stake };
     }
     async cancel(user: string) { await this.db.source.query('UPDATE users SET queue_stake=NULL,queued_at=NULL WHERE id=$1', [user]); await this.redis.client.zrem('spotkick:queue', user); return { queued: false }; }
+    async practice(user: string, stake: number) {
+        if (this.identity.core.enabled) throw new Error('Practice is available in play-money mode only');
+        return this.db.tx(async (m) => {
+            const [player] = await m.query(
+                'SELECT id, name, bot, active_game, queue_stake FROM users WHERE id=$1 AND NOT core_user AND NOT bot FOR UPDATE',
+                [user],
+            );
+            if (!player) throw new Error('Guest session required');
+            if (player.active_game) throw new Error('Finish your active game first');
+            if (player.queue_stake) throw new Error('Cancel your existing queue first');
+            const bot = await this.identity.create(true, m);
+            const id = await this.create(m, [player, bot], stake);
+            return { id };
+        });
+    }
     async matchmake() {
         // Rebuild the disposable Redis index after eviction/restart.
         const core = this.identity.core.enabled;
@@ -121,6 +136,7 @@ export class MatchEngine {
         }
         if (!s.core) await this.drive(m, s, now);
         await this.persist(m, s);
+        return id;
     }
     async fallback(s: MatchState, user: string): Promise<Secret> { return { choice: await fairZone(s.seed, `timeout:${s.id}:${user}`, s.exchange), salt: await hmac256(s.seed, `salt:${s.exchange}:${user}`) }; }
     async drive(m: EntityManager, s: MatchState, now: number) {

@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test';
-test('a guest plays a full bot match, reloads, verifies fairness and sees settled funds', async ({ page }) => {
+test('a guest starts practice directly, reloads, verifies fairness and sees settled funds', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('button', { name: 'Find match', exact: true })).toBeEnabled();
+    const practice = page.getByRole('button', { name: 'Practice vs bot', exact: true });
+    await expect(practice).toBeEnabled();
     await expect(page.getByTestId('balance')).toHaveText('1,000');
-    await page.getByRole('button', { name: 'Find match', exact: true }).click();
+    await practice.click();
     await expect(page.getByTestId('scoreboard')).toBeVisible();
+    await expect(page.getByText('Bot opponent', { exact: false })).toBeVisible();
     await page.reload();
     await expect(page.getByTestId('scoreboard')).toBeVisible();
     await expect(page.getByTestId('balance')).toHaveText('990');

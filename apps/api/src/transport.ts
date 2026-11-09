@@ -139,6 +139,7 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection {
                 if (room.startsWith('match:') && room !== `match:${id}`)
                     await socket.leave(room); await socket.join(`match:${id}`); return this.engine.get(id, user.id); });
             handle('queue:join', async (v) => this.engine.queue(user.id, queueSchema.parse(v).stake));
+            handle('match:practice', async (v) => this.engine.practice(user.id, queueSchema.parse(v).stake));
             handle('queue:cancel', async () => this.engine.cancel(user.id));
             handle('choice:commit', async (v) => { const p = commitSchema.parse(v); return this.engine.command(p.matchId, user.id, p.exchange, 'commit', p.hash); });
             handle('choice:reveal', async (v) => { const p = revealSchema.parse(v); return this.engine.command(p.matchId, user.id, p.exchange, 'reveal', { choice: p.choice, salt: p.salt }); });

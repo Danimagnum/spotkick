@@ -24,7 +24,7 @@ docker compose up --build
 
 Open **http://localhost:3000**. API health: **http://localhost:3001/health**. The migration job finishes before the API becomes available. PostgreSQL and Redis volumes survive restarts. The API also checks migrations under a PostgreSQL advisory lock on startup.
 
-Each browser profile receives a guest session and **1,000 S** in play credits. A separate profile/incognito window creates a second player. Select a stake and find a match; a bot joins after five seconds if no compatible human is waiting. Bot identities are explicitly marked. Refresh during a match to reconnect.
+Each browser profile receives a guest session and **1,000 S** in play credits. Select a stake and choose **Find match** to enter the queue, where a bot joins after five seconds if no compatible human is waiting. **Practice vs bot** starts the same head-to-head rules immediately with a bot and play credits. A separate profile or incognito window creates a second player. Refresh during a match to reconnect.
 
 The bearer token is stored in localStorage. Clearing it creates a new guest wallet rather than recovering the old one. This is a portfolio guest-identity system, not account recovery.
 

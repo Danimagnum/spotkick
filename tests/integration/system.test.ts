@@ -94,6 +94,24 @@ describe('authoritative matches', () => {
         expect(await balance(`user:${user.id}`)).toBe(100000n);
         expect(await balance(`escrow:${id}`)).toBe(0n);
     });
+    it('starts one practice match on duplicate requests without taking a waiting human', async () => {
+        const player = await identity.create(), waiting = await identity.create();
+        await engine.queue(waiting.id, 500);
+        const results = await Promise.allSettled([
+            engine.practice(player.id, 500),
+            engine.practice(player.id, 500),
+        ]);
+        const started = results.filter(result => result.status === 'fulfilled');
+        expect(started).toHaveLength(1);
+        const { id } = started[0].value;
+        const view = await engine.get(id, player.id);
+        expect(view.players.map(p => p.bot)).toEqual([false, true]);
+        expect(await balance(`user:${player.id}`)).toBe(99500n);
+        const [queued] = await db.source.query('SELECT queue_stake, active_game FROM users WHERE id=$1', [waiting.id]);
+        expect(queued).toEqual({ queue_stake: 500, active_game: null });
+        await engine.abandon(id);
+        await engine.cancel(waiting.id);
+    });
 });
 describe('solo escrow and provable fairness', () => {
     it('reserves liability, deduplicates concurrent shots and pays cash-out once', async () => {
