@@ -128,6 +128,36 @@ async function tickNow(id: string) {
 }
 const facts = (id: string) => db.source.query('SELECT * FROM platform_outbox WHERE aggregate_key=$1 ORDER BY sequence', [id]);
 
+it('pairs compatible Core players behind an unmatched stake and keeps queues separate', async () => {
+    const [first, second, third] = Array.from({ length: 3 }, () => randomUUID());
+    const demoKey = 'spotkick-test:queue', coreKey = 'spotkick-test:queue:core';
+    const demoEntry = randomUUID();
+    const started = Date.now() - 1000;
+    let matchId: string | undefined;
+    try {
+        await redis.client.zadd(demoKey, started, demoEntry);
+        for (const [index, id] of [first, second, third].entries()) {
+            await db.source.query(
+                'INSERT INTO users(id,name,token_hash,bot,core_user,queue_stake,queued_at) VALUES($1::uuid,$2,$1::uuid::text,false,true,$3,$4)',
+                [id, 'Core player', index === 0 ? 500 : 1000, started + index],
+            );
+        }
+        await engine.matchmake();
+        const players = await db.source.query('SELECT id,active_game FROM users WHERE id=ANY($1::uuid[])', [[first, second, third]]);
+        const game = players.find((player: { id: string }) => player.id === second)?.active_game;
+        matchId = game?.slice(6);
+        expect(game).toMatch(/^match:/);
+        expect(players).toEqual(expect.arrayContaining([{ id: first, active_game: null }, { id: third, active_game: game }]));
+        expect(await redis.client.zscore(demoKey, demoEntry)).toBe(String(started));
+        expect(await redis.client.zrange(coreKey, 0, -1)).toContain(first);
+    } finally {
+        if (matchId) await db.source.query('DELETE FROM matches WHERE id=$1', [matchId]);
+        await db.source.query('DELETE FROM users WHERE id=ANY($1::uuid[])', [[first, second, third]]);
+        await redis.client.zrem(coreKey, first, second, third);
+        await redis.client.zrem(demoKey, demoEntry);
+    }
+});
+
 it('rolls back the outbox with the business transaction and preserves event ID on a failed delivery', async () => {
     const matchId = randomUUID();
     const topic = 'spotkick.match.started.v1';
@@ -138,6 +168,8 @@ it('rolls back the outbox with the business transaction and preserves event ID o
     })).rejects.toThrow('forced rollback');
     expect(await facts(matchId)).toEqual([]);
     const event = await db.tx(tx => enqueuePlatformEvent(tx, topic, matchId, data));
+    const otherId = randomUUID();
+    await db.tx(tx => enqueuePlatformEvent(tx, topic, otherId, { ...data, matchId: otherId }));
     let attempted = false;
     const publish = vi.fn(async (_topic: string, key: string) => {
         if (key === matchId && !attempted) {
@@ -146,8 +178,11 @@ it('rolls back the outbox with the business transaction and preserves event ID o
         }
     });
     const relay = new PlatformRelay(db, { publish } as unknown as KafkaTransport);
-    await expect((async () => { while (await relay.publishNext()) { /* Drain any older test facts. */ } })()).rejects.toThrow('no broker ack');
-    expect((await facts(matchId))[0].published_at).toBeNull();
+    while (await relay.publishNext()) { /* Drain available facts. */ }
+    expect((await facts(matchId))[0]).toMatchObject({ published_at: null, next_attempt_at: expect.any(Date) });
+    expect((await facts(otherId))[0].published_at).not.toBeNull();
+    expect(publish.mock.calls.filter(call => call[1] === matchId)).toHaveLength(1);
+    await db.source.query('UPDATE platform_outbox SET next_attempt_at=now() WHERE id=$1', [event.id]);
     await expect(relay.publishNext()).resolves.toBe(true);
     expect(publish.mock.calls.filter(call => call[1] === matchId)).toEqual([[topic, matchId, event], [topic, matchId, event]]);
     expect((await facts(matchId))[0].published_at).not.toBeNull();

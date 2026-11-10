@@ -1,6 +1,7 @@
 import { Injectable, type BeforeApplicationShutdown, type OnApplicationBootstrap } from '@nestjs/common';
 import { Database } from '../database/db';
 import { platformMode } from '../platform-config';
+import { errorDetails } from './diagnostics';
 import { assertPlatformEvent, type PlatformTopic } from './events';
 import { KafkaTransport } from './kafka';
 
@@ -26,9 +27,9 @@ export class PlatformRelay implements OnApplicationBootstrap, BeforeApplicationS
             for (let i = 0; i < 20 && !this.stopping; i++) {
                 if (!await this.publishNext()) break;
             }
-        } catch {
+        } catch (error) {
             this.retryAt = Date.now() + 2000;
-            console.warn(JSON.stringify({ event: 'platform.outbox.retry' }));
+            console.warn(JSON.stringify({ event: 'platform.outbox.retry', ...errorDetails(error) }));
         }
     }
 
@@ -37,7 +38,9 @@ export class PlatformRelay implements OnApplicationBootstrap, BeforeApplicationS
             const [row]: { id: string; topic: PlatformTopic; aggregate_key: string; payload: unknown }[] = await tx.query(`
                 SELECT candidate.id, candidate.topic, candidate.aggregate_key, candidate.payload
                 FROM platform_outbox candidate
-                WHERE candidate.published_at IS NULL AND NOT EXISTS (
+                WHERE candidate.published_at IS NULL
+                    AND (candidate.next_attempt_at IS NULL OR candidate.next_attempt_at <= now())
+                    AND NOT EXISTS (
                     SELECT 1 FROM platform_outbox earlier
                     WHERE earlier.published_at IS NULL AND earlier.sequence < candidate.sequence
                         AND earlier.topic = candidate.topic AND earlier.aggregate_key = candidate.aggregate_key
@@ -46,9 +49,15 @@ export class PlatformRelay implements OnApplicationBootstrap, BeforeApplicationS
             `);
             if (!row) return false;
             const { id, topic, aggregate_key: key, payload } = row;
-            assertPlatformEvent(topic, payload);
-            if (payload.id !== id) throw new Error('Platform outbox event ID mismatch');
-            await this.kafka.publish(topic, key, payload);
+            try {
+                assertPlatformEvent(topic, payload);
+                if (payload.id !== id) throw new Error('Platform outbox event ID mismatch');
+                await this.kafka.publish(topic, key, payload);
+            } catch (error) {
+                await tx.query("UPDATE platform_outbox SET next_attempt_at=now()+interval '30 seconds' WHERE id=$1", [id]);
+                console.warn(JSON.stringify({ event: 'platform.outbox.delivery_retry', id, topic, ...errorDetails(error) }));
+                return true;
+            }
             await tx.query('UPDATE platform_outbox SET published_at=now() WHERE id=$1', [id]);
             return true;
         });

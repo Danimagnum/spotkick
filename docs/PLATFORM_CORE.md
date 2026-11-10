@@ -20,17 +20,17 @@ A definitive wallet conflict leaves the command and decision available for recon
 
 ## Platform events and operations
 
-The three vendored JSON Schemas come from `Danimagnum/platform-contracts@aae7661`. Match facts are stored in `platform_outbox` in the same transaction as the confirmed state. The relay sends with an aggregate key, the `event-id` header and broker acknowledgements before marking the row. Consumers deduplicate by event ID. Prepare the three topics and broker permissions before starting platform mode. SpotKick uses the broker listener advertised to the API.
+The three vendored JSON Schemas come from `Danimagnum/platform-contracts@aae7661`. Match facts are stored in `platform_outbox` in the same transaction as the confirmed state. The relay sends with an aggregate key, the `event-id` header and broker acknowledgements before marking the row. Failed deliveries are scheduled for retry after 30 seconds. Earlier unpublished events block only later events with the same topic and aggregate key. Consumers deduplicate by event ID. Prepare the three topics and broker permissions before starting platform mode. SpotKick uses the broker listener advertised to the API.
 
 - `spotkick.match.started.v1` follows confirmation of both stakes.
 - `spotkick.match.settled.v1` follows a confirmed payment or refund. It includes the persisted `settlementId`. A tie in regulation continues into sudden death.
 - `system.health.reported.v1` is recorded every 30 seconds while PostgreSQL is available. Its HTTP latency and error rate use the trailing minute and exclude probes and metrics scrapes.
 
-`/health` keeps its demo contract. Use `/health/live` for process liveness, `/health/ready` for dependency and migration readiness, and `/metrics` for Prometheus counters and histogram buckets. The API can be run as UID/GID 1000 on a read-only root filesystem with `/tmp` writable.
+`/health` keeps its demo contract. Use `/health/live` for process liveness, `/health/ready` for dependency and migration readiness, and `/metrics` for Prometheus counters and histogram buckets. Readiness returns HTTP 503 during dependency outages and migration startup. Concurrent requests share the probes, and results are cached for one second. Health events estimate latency p95 from fixed histogram buckets over the trailing minute, with one-second resolution at the window boundary. The API can be run as UID/GID 1000 on a read-only root filesystem with `/tmp` writable.
 
 ## Migration and rollback
 
-Migration `1700000000003-PlatformOutbox` creates a separate outbox table. It does not modify the wallet journal. Before applying it in any hosted environment, drain pending wallet operations and take a PostgreSQL custom-format backup:
+Migration `1700000000003-PlatformOutbox` creates a separate outbox table. Migration `1700000000004-PlatformOutboxRetry` adds the retry schedule. Before applying these migrations in any hosted environment, drain pending wallet operations and take a PostgreSQL custom-format backup:
 
 ```sh
 pg_dump --format=custom --file=spotkick-before-platform.dump "$DATABASE_URL"

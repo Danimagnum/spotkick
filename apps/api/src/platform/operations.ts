@@ -10,6 +10,8 @@ import { KafkaTransport } from './kafka';
 
 const buckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 const probePaths = new Set(['/health', '/health/live', '/health/ready', '/metrics']);
+type Health = 'healthy' | 'degraded' | 'unhealthy';
+type WindowBucket = { at: number; count: number; failed: number; bins: number[]; maxima: number[] };
 
 async function probe(operation: Promise<unknown>): Promise<boolean> {
     let timer: NodeJS.Timeout | undefined;
@@ -29,7 +31,9 @@ export class Operations implements OnApplicationBootstrap, BeforeApplicationShut
     private readonly histogram = buckets.map(() => 0);
     private duration = 0;
     private count = 0;
-    private samples: { at: number; ms: number; failed: boolean }[] = [];
+    private readonly samples = new Map<number, WindowBucket>();
+    private readonly probing = new Map<string, Promise<unknown>>();
+    private readiness?: { result: Promise<Health>; expires: number };
     private timer?: NodeJS.Timeout;
     private pending?: Promise<void>;
     private stopping = false;
@@ -66,26 +70,32 @@ export class Operations implements OnApplicationBootstrap, BeforeApplicationShut
         const seconds = elapsedMs / 1000;
         this.duration += seconds;
         buckets.forEach((bucket, index) => { if (seconds <= bucket) this.histogram[index]++; });
-        this.prune(now);
-        this.samples.push({ at: now, ms: elapsedMs, failed: statusCode >= 400 });
-    }
-
-    private prune(now: number) {
-        const oldest = now - 60_000;
-        if (this.samples[0]?.at <= oldest) {
-            const first = this.samples.findIndex(sample => sample.at > oldest);
-            this.samples = first === -1 ? [] : this.samples.slice(first);
+        const second = Math.floor(now / 1000) % 61;
+        let sample = this.samples.get(second);
+        if (!sample || Math.floor(sample.at / 1000) !== Math.floor(now / 1000)) {
+            sample = { at: now, count: 0, failed: 0, bins: Array(buckets.length + 1).fill(0), maxima: Array(buckets.length + 1).fill(0) };
+            this.samples.set(second, sample);
         }
+        const index = buckets.findIndex(bucket => seconds <= bucket);
+        const bin = index < 0 ? buckets.length : index;
+        sample.at = now;
+        sample.count++;
+        if (statusCode >= 400) sample.failed++;
+        sample.bins[bin]++;
+        sample.maxima[bin] = Math.max(sample.maxima[bin], elapsedMs);
     }
 
     window(now = Date.now()) {
-        this.prune(now);
-        if (!this.samples.length) return { latencyP95: 0, errorRate: 0 };
-        const latencies = this.samples.map(sample => sample.ms).sort((a, b) => a - b);
-        return {
-            latencyP95: latencies[Math.ceil(0.95 * latencies.length) - 1],
-            errorRate: this.samples.filter(sample => sample.failed).length / latencies.length,
-        };
+        const samples = Array.from(this.samples.values()).filter(sample => sample.at > now - 60_000);
+        const total = samples.reduce((sum, sample) => sum + sample.count, 0);
+        if (!total) return { latencyP95: 0, errorRate: 0 };
+        const failed = samples.reduce((sum, sample) => sum + sample.failed, 0);
+        let remaining = Math.ceil(0.95 * total);
+        const bin = Array.from({ length: buckets.length + 1 }).findIndex((_, index) => {
+            remaining -= samples.reduce((sum, sample) => sum + sample.bins[index], 0);
+            return remaining <= 0;
+        });
+        return { latencyP95: Math.max(...samples.map(sample => sample.maxima[bin])), errorRate: failed / total };
     }
 
     metrics() {
@@ -101,13 +111,29 @@ export class Operations implements OnApplicationBootstrap, BeforeApplicationShut
         ].join('\n');
     }
 
-    async status(): Promise<'healthy' | 'degraded' | 'unhealthy'> {
-        if (this.stopping || !this.db.ready) return 'unhealthy';
+    private dependency(name: string, check: () => Promise<unknown>) {
+        let pending = this.probing.get(name);
+        if (!pending) {
+            pending = Promise.resolve().then(check).finally(() => this.probing.delete(name));
+            this.probing.set(name, pending);
+        }
+        return probe(pending);
+    }
+
+    status(): Promise<Health> {
+        if (this.stopping || !this.db.ready) return Promise.resolve('unhealthy');
+        if (this.readiness && Date.now() < this.readiness.expires) return this.readiness.result;
+        const check = { expires: Infinity, result: this.checkStatus().finally(() => { check.expires = Date.now() + 1000; }) };
+        this.readiness = check;
+        return check.result;
+    }
+
+    private async checkStatus(): Promise<Health> {
         const [database, redis, broker, core] = await Promise.all([
-            probe(this.db.source.query('SELECT 1')),
-            probe(this.redis.client.ping()),
+            this.dependency('database', () => this.db.source.query('SELECT 1')),
+            this.dependency('redis', () => this.redis.client.ping()),
             platformMode() ? this.kafka.ready() : Promise.resolve(true),
-            platformMode() ? probe(this.core.checkReadiness()) : Promise.resolve(true),
+            platformMode() ? this.dependency('core', () => this.core.checkReadiness()) : Promise.resolve(true),
         ]);
         if (!database || !redis) return 'unhealthy';
         return broker && core ? 'healthy' : 'degraded';
