@@ -40,6 +40,7 @@ export interface MatchState extends MatchView {
 }
 export const choiceMs = () => Number(process.env.CHOICE_MS || 10000);
 export const revealMs = () => Number(process.env.REVEAL_MS || 3000);
+const queueKey = (core: boolean) => redisKey(core ? 'queue:core' : 'queue');
 @Injectable()
 export class MatchEngine {
     constructor(private db: Database, private ledger: Ledger, private identity: Identity, private redis: RedisService) { }
@@ -70,10 +71,10 @@ export class MatchEngine {
                 throw new Error('Cancel your existing queue first');
             await m.query('UPDATE users SET queue_stake=$2,queued_at=COALESCE(queued_at,$3) WHERE id=$1', [user, stake, Date.now()]);
         });
-        await this.redis.client.zadd(redisKey('queue'), 'NX', Date.now(), user);
+        await this.redis.client.zadd(queueKey(core.enabled), 'NX', Date.now(), user);
         return { queued: true, stake };
     }
-    async cancel(user: string) { await this.db.source.query('UPDATE users SET queue_stake=NULL,queued_at=NULL WHERE id=$1', [user]); await this.redis.client.zrem(redisKey('queue'), user); return { queued: false }; }
+    async cancel(user: string) { await this.db.source.query('UPDATE users SET queue_stake=NULL,queued_at=NULL WHERE id=$1', [user]); await this.redis.client.zrem(queueKey(this.identity.core.enabled), user); return { queued: false }; }
     async practice(user: string, stake: number) {
         if (this.identity.core.enabled) throw new Error('Practice is available in play-money mode only');
         return this.db.tx(async (m) => {
@@ -96,25 +97,35 @@ export class MatchEngine {
         if (waiting.length) {
             const batch = this.redis.client.multi();
             for (const u of waiting)
-                batch.zadd(redisKey('queue'), 'NX', u.queued_at, u.id);
+                batch.zadd(queueKey(core), 'NX', u.queued_at, u.id);
             await batch.exec();
         }
-        const ids = await this.redis.client.zrange(redisKey('queue'), 0, 49);
+        const ids = await this.redis.client.zrange(queueKey(core), 0, 49);
         if (!ids.length)
             return;
         await this.db.tx(async (m) => {
-            const [{ locked }] = await m.query('SELECT pg_try_advisory_xact_lock(481591) AS locked');
+            const [{ locked }] = await m.query('SELECT pg_try_advisory_xact_lock($1) AS locked', [core ? 481592 : 481591]);
             if (!locked)
                 return;
-            const candidates = await m.query('SELECT * FROM users WHERE id=ANY($1::uuid[]) AND queue_stake IS NOT NULL AND active_game IS NULL AND core_user=$2 ORDER BY queued_at,id FOR UPDATE SKIP LOCKED', [ids, core]);
-            if (!candidates.length)
-                return;
-            const a = candidates[0];
-            let b = candidates.find((x: typeof a) => x.id !== a.id && x.queue_stake === a.queue_stake);
-            if (!b && (core || Date.now() - Number(a.queued_at) < Number(process.env.BOT_AFTER_MS || 5000)))
-                return;
-            if (!b)
+            const botCutoff = core ? null : Date.now() - Number(process.env.BOT_AFTER_MS || 5000);
+            const [a] = await m.query(`
+                SELECT candidate.* FROM users candidate
+                WHERE candidate.core_user=$1 AND candidate.active_game IS NULL AND candidate.queue_stake IS NOT NULL
+                    AND (candidate.queued_at <= $2 OR EXISTS (
+                        SELECT 1 FROM users peer WHERE peer.core_user=$1 AND peer.active_game IS NULL
+                            AND peer.queue_stake=candidate.queue_stake AND peer.id<>candidate.id
+                    ))
+                ORDER BY candidate.queued_at,candidate.id LIMIT 1 FOR UPDATE OF candidate SKIP LOCKED
+            `, [core, botCutoff]);
+            if (!a) return;
+            let [b] = await m.query(`
+                SELECT * FROM users WHERE core_user=$1 AND active_game IS NULL AND queue_stake=$2 AND id<>$3
+                ORDER BY queued_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
+            `, [core, a.queue_stake, a.id]);
+            if (!b) {
+                if (botCutoff === null || Number(a.queued_at) > botCutoff) return;
                 b = await this.identity.create(true, m);
+            }
             await this.create(m, [a, b].map(p => ({ id: p.id, name: p.name, bot: p.bot })), a.queue_stake);
         });
         const stillWaiting = new Set((await this.db.source.query('SELECT id FROM users WHERE queue_stake IS NOT NULL AND core_user=$1', [core])).map((x: {
@@ -122,7 +133,7 @@ export class MatchEngine {
         }) => x.id));
         const stale = ids.filter(id => !stillWaiting.has(id));
         if (stale.length)
-            await this.redis.client.zrem(redisKey('queue'), ...stale);
+            await this.redis.client.zrem(queueKey(core), ...stale);
     }
     async create(m: EntityManager, players: Player[], stake: number) {
         players = players.map(({id,name,bot}) => ({id,name,bot}));

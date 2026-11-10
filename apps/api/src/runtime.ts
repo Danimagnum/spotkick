@@ -3,8 +3,9 @@ import { Server } from 'socket.io';
 import * as Sentry from '@sentry/node';
 import { Database } from './database/db';
 import { RedisService } from './redis';
-import { MatchEngine } from './matches/engine';
-import { redisKey } from './platform-config';
+import { MatchEngine, type MatchState } from './matches/engine';
+import { coreEnabled, redisKey } from './platform-config';
+const publicName = (id: string, name: string, core: boolean) => core ? `Player ${id.slice(0, 8)}` : name;
 @Injectable()
 export class Runtime implements BeforeApplicationShutdown, OnApplicationBootstrap {
     server?: Server;
@@ -22,15 +23,20 @@ export class Runtime implements BeforeApplicationShutdown, OnApplicationBootstra
         const now = Date.now();
         await this.redis.client.zremrangebyscore(redisKey('presence'), 0, now - 20000);
         const onlineIds = await this.redis.client.zrange(redisKey('presence'), 0, -1);
-        const online = onlineIds.length ? await this.db.source.query('SELECT id,name,bot FROM users WHERE id=ANY($1::uuid[])', [onlineIds]) : [];
-        const [{ count }] = await this.db.source.query("SELECT COUNT(*)::int AS count FROM matches WHERE status NOT IN ('SETTLED','ABANDONED')");
-        const recent = await this.db.source.query("SELECT id,state FROM matches WHERE status='SETTLED' ORDER BY updated_at DESC LIMIT 6");
-        return { online, matches: count, recent: recent.map((r: {
-                id: string;
-                state: any;
-            }) => ({ id: r.id, winner: r.state.players.find((p: {
-                    id: string;
-                }) => p.id === r.state.winner).name, payout: r.state.payout, score: r.state.score })), config: { rakeBps: Number(process.env.RAKE_BPS || 300), botAfterMs: Number(process.env.BOT_AFTER_MS || 5000), choiceMs: Number(process.env.CHOICE_MS || 10000) } };
+        const core = coreEnabled();
+        const players: { id: string; name: string; bot: boolean }[] = onlineIds.length
+            ? await this.db.source.query('SELECT id,name,bot FROM users WHERE id=ANY($1::uuid[]) AND core_user=$2', [onlineIds, core]) : [];
+        const online = players.map(({ id, name, bot }) => ({ id, name: publicName(id, name, core), bot }));
+        const [{ count }] = await this.db.source.query("SELECT COUNT(*)::int AS count FROM matches WHERE status NOT IN ('SETTLED','ABANDONED') AND (state ? 'core')=$1", [core]);
+        const recent: { id: string; state: MatchState }[] = await this.db.source.query("SELECT id,state FROM matches WHERE status='SETTLED' AND (state ? 'core')=$1 ORDER BY updated_at DESC LIMIT 6", [core]);
+        return {
+            online, matches: count,
+            recent: recent.flatMap(({ id, state }) => {
+                const winner = state.players.find(player => player.id === state.winner);
+                return winner ? [{ id, winner: publicName(winner.id, winner.name, core), payout: state.payout, score: state.score }] : [];
+            }),
+            config: { rakeBps: Number(process.env.RAKE_BPS || 300), botAfterMs: Number(process.env.BOT_AFTER_MS || 5000), choiceMs: Number(process.env.CHOICE_MS || 10000) },
+        };
     }
     async tick() {
         if (this.busy || this.stopping || !this.server || !this.db.ready)
