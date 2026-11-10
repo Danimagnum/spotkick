@@ -56,6 +56,40 @@ it('loads the configured JWKS, follows kid rotation and rejects service tokens',
     await expect(client.user(original)).resolves.toMatchObject({ id: sub });
     await expect(client.user(token('new', second.privateKey, { ...claims, aud: 'other' }))).rejects.toThrow('valid Core session');
     await expect(client.user(token('new', second.privateKey, { ...claims, kind: 'service', client_id: 'spotkick' }))).rejects.toThrow('valid Core session');
+    await expect(client.verifyUserToken(token('new', second.privateKey, { ...claims, iat: iat + 4, nbf: iat + 4 }))).resolves.toMatchObject({ sub });
+    await expect(client.verifyUserToken(token('new', second.privateKey, { ...claims, nbf: iat + 30 }))).rejects.toThrow('valid Core session');
+    await expect(client.verifyUserToken(token('new', second.privateKey, { ...claims, exp: iat }))).rejects.toThrow('valid Core session');
     expect(profileCalls).toBe(4);
     expect(loads).toBe(2);
+});
+
+it.each([false, true])('refreshes a rejected service token once (second rejection: %s)', async (rejectAgain) => {
+    let tokenRequests = 0;
+    const requests: { token?: string; key?: string | string[]; body: string }[] = [];
+    server = createServer(async (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        if (req.url === '/oauth/token') {
+            res.end(JSON.stringify({ access_token: 'token-' + ++tokenRequests, expires_in: 90 }));
+            return;
+        }
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) chunks.push(chunk);
+        requests.push({ token: req.headers.authorization, key: req.headers['idempotency-key'], body: Buffer.concat(chunks).toString() });
+        if (requests.length === 1 || rejectAgain) res.writeHead(401).end(JSON.stringify({ code: 'invalid_token' }));
+        else res.end(JSON.stringify({ status: 'settled', payout: '1940' }));
+    });
+    await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing HTTP address');
+    vi.stubEnv('CORE_URL', `http://127.0.0.1:${address.port}`);
+    vi.stubEnv('CORE_CLIENT_SECRET', 'test-secret');
+    const matchId = randomUUID();
+    const body = { winnerId: randomUUID() };
+    const settlement = new CoreClient().match(matchId, 'settle', body);
+    if (rejectAgain) await expect(settlement).rejects.toMatchObject({ status: 401 });
+    else await expect(settlement).resolves.toMatchObject({ status: 'settled' });
+    expect(tokenRequests).toBe(2);
+    expect(requests).toEqual(['token-1', 'token-2'].map(token => ({
+        token: 'Bearer ' + token, key: `match:${matchId}:settle`, body: JSON.stringify(body),
+    })));
 });

@@ -130,7 +130,7 @@ export class CoreClient {
         this.keysUntil = Date.now() + 60_000;
     }
 
-    async user(token?: string) {
+    async verifyUserToken(token?: string) {
         try {
             if (!token || token.length > 8192) throw new Error('Invalid token');
             const parts = token.split('.');
@@ -153,8 +153,19 @@ export class CoreClient {
             const audience = process.env.CORE_AUDIENCE ?? 'platform-core';
             const issuer = process.env.CORE_ISSUER ?? new URL(process.env.CORE_URL!).origin;
             if (claims.iss !== issuer || ![claims.aud].flat().includes(audience) ||
-                claims.exp <= now || claims.iat > now || (claims.nbf !== undefined && claims.nbf > now))
+                claims.exp <= now || claims.iat > now + 5 || (claims.nbf !== undefined && claims.nbf > now + 5))
                 throw new Error('Invalid claims');
+            return claims;
+        } catch (error) {
+            if (error instanceof CoreRequestError && error.status >= 500)
+                throw new ServiceUnavailableException('Core identity is unavailable');
+            throw new UnauthorizedException('A valid Core session is required');
+        }
+    }
+
+    async user(token?: string) {
+        const claims = await this.verifyUserToken(token);
+        try {
             const user = userSchema.parse(await this.request('/v1/me', { Authorization: 'Bearer ' + token }));
             if (user.id !== claims.sub) throw new Error('Invalid subject');
             return user;
@@ -166,15 +177,18 @@ export class CoreClient {
     }
 
     private async service(path: string, body?: object, key?: string, correlation?: string) {
+        const encoded = body === undefined ? undefined : JSON.stringify(body);
+        const send = (token: string) => this.request(path, {
+            Authorization: 'Bearer ' + token,
+            ...(key ? { 'Idempotency-Key': key, 'X-Correlation-Id': correlation!, 'Content-Type': 'application/json' } : {}),
+        }, encoded);
         const token = await this.serviceToken();
         try {
-            return await this.request(path, {
-                Authorization: 'Bearer ' + token,
-                ...(key ? { 'Idempotency-Key': key, 'X-Correlation-Id': correlation!, 'Content-Type': 'application/json' } : {}),
-            }, body === undefined ? undefined : JSON.stringify(body));
+            return await send(token);
         } catch (error) {
-            if (error instanceof CoreRequestError && error.status === 401) this.access = undefined;
-            throw error;
+            if (!(error instanceof CoreRequestError) || error.status !== 401) throw error;
+            if (this.access?.token === token) this.access = undefined;
+            return send(await this.serviceToken());
         }
     }
 

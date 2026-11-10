@@ -133,11 +133,11 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection {
                     await this.redis.client.expire(key, 2);
                 if (n > 30)
                     throw new Error('Slow down and retry');
-                if (this.identity.core.enabled) await this.identity.core.user(socket.handshake.auth.token);
+                if (this.identity.core.enabled) await this.identity.core.verifyUserToken(socket.handshake.auth.token);
                 ack({ ok: true, data: await fn(data) });
             }
             catch (e) {
-                ack({ ok: false, error: safeError(e) });
+                ack({ ok: false, error: safeError(e), status: e instanceof HttpException ? e.getStatus() : undefined });
             } });
             handle('heartbeat', async () => { await heartbeat(); return { ok: true }; });
             handle('match:join', async (v) => { const id = idSchema.parse(v?.id); await this.engine.get(id, user.id); for (const room of socket.rooms)
@@ -150,7 +150,9 @@ export class GameGateway implements OnGatewayInit, OnGatewayConnection {
             handle('choice:reveal', async (v) => { const p = revealSchema.parse(v); return this.engine.command(p.matchId, user.id, p.exchange, 'reveal', { choice: p.choice, salt: p.salt }); });
             socket.emit('ready', { id: user.id, activeGame: user.active_game, queuedStake: user.queue_stake });
         }
-        catch {
+        catch (error) {
+            if (this.identity.core.enabled && error instanceof HttpException && error.getStatus() === 401)
+                socket.emit('session:expired');
             socket.disconnect(true);
         }
     }
