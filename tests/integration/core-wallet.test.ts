@@ -1,5 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { randomUUID, scryptSync } from 'node:crypto';
+import { createServer, type Server } from 'node:http';
 import { commitment, type Zone } from '@spotkick/shared';
 import { Database, makeDataSource } from '../../apps/api/src/database/db';
 import { Identity } from '../../apps/api/src/identity';
@@ -17,6 +18,7 @@ function isolated(name: string) {
 describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platform Core', () => {
     let db: Database, coreDb: ReturnType<typeof makeDataSource>, redis: RedisService;
     let core: CoreClient, engine: MatchEngine, identity: Identity;
+    let proxy: Server | undefined;
     const players: Awaited<ReturnType<Identity['auth']>>[] = [];
 
     async function post(path: string, body: object, token?: string) {
@@ -32,6 +34,8 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
 
     beforeAll(async () => {
         isolated('DATABASE_URL');
+        const url = new URL(process.env.CORE_URL!);
+        if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) throw new Error('Core test API must be local');
         coreDb = await makeDataSource(isolated('SPOTKICK_CORE_TEST_DATABASE_URL')).initialize();
         db = new Database();
         await db.onModuleInit();
@@ -42,9 +46,10 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
         const salt = randomUUID();
         const hash = 'scrypt:' + salt + ':' + scryptSync(secret, salt, 64).toString('hex');
         await coreDb.query("INSERT INTO service_clients(id,secret_hash,scopes) VALUES($1,$2,ARRAY['spotkick:matches'])", [client, hash]);
-        process.env.CORE_CLIENT_ID = client;
-        process.env.CORE_CLIENT_SECRET = secret;
-        process.env.RESULT_MS = '0';
+        vi.stubEnv('PLATFORM_MODE', 'true');
+        vi.stubEnv('CORE_CLIENT_ID', client);
+        vi.stubEnv('CORE_CLIENT_SECRET', secret);
+        vi.stubEnv('RESULT_MS', '0');
         core = new CoreClient();
         const ledger = new Ledger();
         identity = new Identity(db, ledger, core);
@@ -62,6 +67,8 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
     });
 
     afterAll(async () => {
+        if (proxy) await new Promise<void>(resolve => proxy!.close(() => resolve()));
+        vi.unstubAllEnvs();
         await redis?.onApplicationShutdown();
         await db?.onApplicationShutdown();
         await coreDb?.destroy();
@@ -85,13 +92,37 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
     }
 
     it('replays lost replies, settles the winner once, refunds cancellation and rolls back rejected pairing', async () => {
-        const match = core.match.bind(core);
+        const upstream = process.env.CORE_URL!;
         const lost = new Set(['reserve', 'settle']);
-        core.match = async (...args) => {
-            const result = await match(...args);
-            if (lost.delete(args[1])) throw new Error('Simulated lost response after Core commit');
-            return result;
-        };
+        proxy = createServer(async (req, res) => {
+            try {
+                const path = req.url || '/';
+                const chunks: Buffer[] = [];
+                for await (const chunk of req) chunks.push(chunk);
+                const headers = new Headers();
+                for (const key of ['authorization', 'content-type', 'idempotency-key', 'x-correlation-id']) {
+                    const value = req.headers[key];
+                    if (typeof value === 'string') headers.set(key, value);
+                }
+                const response = await fetch(new URL(path, upstream), {
+                    method: req.method, headers, body: chunks.length ? Buffer.concat(chunks) : undefined,
+                    signal: AbortSignal.timeout(3500),
+                });
+                const body = await response.text();
+                const action = /^\/api\/v1\/spotkick\/matches\/[^/]+\/(reserve|settle)$/.exec(path)?.[1];
+                if (response.ok && action && lost.delete(action)) {
+                    res.destroy();
+                    return;
+                }
+                res.writeHead(response.status, { 'Content-Type': 'application/json' }).end(body);
+            } catch {
+                res.writeHead(502).end('{"code":"test_proxy_unavailable"}');
+            }
+        });
+        await new Promise<void>(resolve => proxy!.listen(0, '127.0.0.1', resolve));
+        const address = proxy.address();
+        if (!address || typeof address === 'string') throw new Error('Missing Core proxy address');
+        vi.stubEnv('CORE_URL', `http://127.0.0.1:${address.port}`);
         const id = await start();
         await engine.tick();
         expect((await engine.get(id, players[0].id)).phase).toBe('MATCHED');
@@ -115,7 +146,13 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
         await engine.tick();
         expect((await engine.get(id, a.id)).phase).toBe('RESOLVED');
         await retry(id);
-        expect(await engine.get(id, a.id)).toMatchObject({ phase: 'SETTLED', winner: a.id, payout: 1940 });
+        const settled = await engine.get(id, a.id);
+        expect(settled).toMatchObject({ phase: 'SETTLED', winner: a.id, payout: 1940 });
+        expect(settled.settlementId).toBeTruthy();
+        expect(await db.source.query('SELECT topic, payload->\'data\' AS data FROM platform_outbox WHERE aggregate_key=$1 ORDER BY sequence', [id])).toEqual([
+            { topic: 'spotkick.match.started.v1', data: { matchId: id, participantIds: [a.id, b.id] } },
+            { topic: 'spotkick.match.settled.v1', data: { matchId: id, result: 'win', settlementId: settled.settlementId, winnerId: a.id } },
+        ]);
         const result = await available();
         expect(result[players.findIndex(p => p.id === a.id)]).toBe('5940');
         expect(result[players.findIndex(p => p.id === b.id)]).toBe('4000');
@@ -137,15 +174,19 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
         await engine.tick();
         await engine.abandon(cancelled);
         await engine.tick();
-        expect((await engine.get(cancelled, a.id)).phase).toBe('ABANDONED');
+        const released = await engine.get(cancelled, a.id);
+        expect(released.phase).toBe('ABANDONED');
+        expect(released.settlementId).toBeTruthy();
         expect(await available()).toEqual(result);
 
         const excluded = players.map(player => player.id).sort()[1];
         await coreDb.query("UPDATE rg_profiles SET permanently_excluded=true WHERE user_id=$1", [excluded]);
         const rejected = await start();
         await engine.tick();
-        expect((await engine.get(rejected, a.id)).phase).toBe('ABANDONED');
+        expect(await engine.get(rejected, a.id)).toMatchObject({ phase: 'ABANDONED', walletIssue: 'responsible_gaming' });
         expect(await available()).toEqual(result);
         expect(await coreDb.query("SELECT id FROM holds WHERE reference=$1", ['spotkick-match:' + rejected])).toEqual([]);
+        expect(await db.source.query('SELECT id FROM platform_outbox WHERE aggregate_key=$1', [rejected])).toEqual([]);
+        expect(lost.size).toBe(0);
     });
 });

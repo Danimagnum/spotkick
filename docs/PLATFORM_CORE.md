@@ -43,10 +43,10 @@ Rehearse restoration into a separate empty database using `pg_restore --exit-on-
 
 With an isolated PostgreSQL database and Redis instance, run `pnpm test:integration`. The fake-Core HTTP suite verifies idempotent requests, rejected stakes, settlement recovery, compensation and the transactional event relay.
 
-Start a Core API with test deposits enabled and an isolated database whose name ends in `_test`. Point SpotKick to a separate `_test` database and a dedicated Redis database. Set `SPOTKICK_CORE_E2E=1`, `SPOTKICK_CORE_TEST_DATABASE_URL` and the Core URL and issuer, then run:
+Start the Core API on loopback with test deposits enabled and an isolated database whose name ends in `_test`. Use a Core build that exposes the grouped SpotKick wallet routes. Point SpotKick to a separate `_test` database and a dedicated Redis database. Set `SPOTKICK_CORE_E2E=1`, `SPOTKICK_CORE_TEST_DATABASE_URL`, `CORE_URL` and the exact Core issuer, audience and JWKS URL, then run:
 
 ```sh
 pnpm exec vitest run tests/integration/core-wallet.test.ts
 ```
 
-The test provisions disposable verified users and a scoped client. It plays a two-user match, loses the reserve and settlement responses after Core commits, retries the operations, verifies payout and rake, refunds a cancellation and checks that excluding one participant rolls back both reservations.
+The test provisions disposable verified users and a scoped client. A loopback HTTP proxy drops the reserve and settlement responses after Core commits, so SpotKick must recover through the real client retry path. The test checks payout, rake, balanced ledger postings, outbox facts, cancellation and a rejection with no holds or started fact.
