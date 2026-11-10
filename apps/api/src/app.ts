@@ -8,6 +8,12 @@ import { MatchEngine } from './matches/engine';
 import { SoloService } from './solo/solo';
 import { Runtime } from './runtime';
 import { ApiController, GameGateway } from './transport';
-@Module({ controllers: [ApiController], providers: [Database, Ledger, CoreClient, Identity, RedisService, MatchEngine, SoloService, Runtime, GameGateway] })
+import { KafkaTransport } from './platform/kafka';
+import { PlatformRelay } from './platform/relay';
+import { Operations, OperationsController } from './platform/operations';
+@Module({ controllers: [ApiController, OperationsController], providers: [
+    Database, Ledger, CoreClient, Identity, RedisService, MatchEngine, SoloService, Runtime, GameGateway,
+    KafkaTransport, PlatformRelay, Operations,
+] })
 export class AppModule {
 }

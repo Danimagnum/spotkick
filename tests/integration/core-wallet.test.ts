@@ -62,8 +62,8 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
     });
 
     afterAll(async () => {
-        await redis?.onModuleDestroy();
-        await db?.onModuleDestroy();
+        await redis?.onApplicationShutdown();
+        await db?.onApplicationShutdown();
         await coreDb?.destroy();
     });
 

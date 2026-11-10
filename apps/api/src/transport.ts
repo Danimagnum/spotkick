@@ -12,6 +12,7 @@ import { MatchEngine } from './matches/engine';
 import { SoloService } from './solo/solo';
 import { RedisService } from './redis';
 import { Runtime } from './runtime';
+import { platformMode, redisKey } from './platform-config';
 const idSchema = z.string().uuid();
 export function safeError(e: unknown) { if (e instanceof ZodError)
     return 'Invalid request'; if (e instanceof HttpException)
@@ -36,7 +37,7 @@ export class ApiController {
     @Post('session')
     async session(
     @Req()
-    req: any, @Body() body: unknown) { const key = `spotkick:guest:${req.ip}`; const n = await this.redis.client.incr(key); if (n === 1)
+    req: any, @Body() body: unknown) { const key = redisKey(`guest:${req.ip}`); const n = await this.redis.client.incr(key); if (n === 1)
         await this.redis.client.expire(key, 60); if (n > Number(process.env.GUEST_RATE_LIMIT || 30))
         throw new HttpException('Too many sessions; try again shortly', 429);
         if (this.identity.core.enabled)
@@ -113,16 +114,16 @@ export class ApiController {
 @WebSocketGateway({ cors: { origin: process.env.WEB_ORIGIN || 'http://localhost:3000' }, transports: ['websocket'], maxHttpBufferSize: 8192 })
 export class GameGateway implements OnGatewayInit, OnGatewayConnection {
     constructor(private identity: Identity, private engine: MatchEngine, private redis: RedisService, private runtime: Runtime) { }
-    afterInit(server: Server) { const pub = this.redis.client.duplicate(), sub = this.redis.client.duplicate(); server.adapter(createAdapter(pub, sub)); server.on('close', () => { pub.disconnect(); sub.disconnect(); }); this.runtime.start(server); }
+    afterInit(server: Server) { const pub = this.redis.client.duplicate(), sub = this.redis.client.duplicate(); server.adapter(createAdapter(pub, sub, platformMode() ? { key: redisKey('socket.io') } : undefined)); server.on('close', () => { pub.disconnect(); sub.disconnect(); }); this.runtime.start(server); }
     async handleConnection(socket: Socket) {
         try {
             const user = await this.identity.auth(socket.handshake.auth.token);
             await socket.join(`user:${user.id}`);
-            const heartbeat = () => this.redis.client.zadd('spotkick:presence', Date.now(), user.id);
+            const heartbeat = () => this.redis.client.zadd(redisKey('presence'), Date.now(), user.id);
             await heartbeat();
             const handle = (name: string, fn: (v: any) => Promise<unknown>) => socket.on(name, async (data, ack) => { if (typeof ack !== 'function')
                 return; try {
-                const key = `spotkick:rate:${user.id}:${Math.floor(Date.now() / 1000)}`;
+                const key = redisKey(`rate:${user.id}:${Math.floor(Date.now() / 1000)}`);
                 const n = await this.redis.client.incr(key);
                 if (n === 1)
                     await this.redis.client.expire(key, 2);
