@@ -131,3 +131,7 @@ export async function fairZone(serverSeed: string, clientSeed: string, nonce: nu
             return zones[Number(BigInt(`0x${digest}`) % 3n)];
     }
 }
+
+export function botZone(serverSeed: string, botId: string, exchange: number): Promise<Zone> {
+    return fairZone(serverSeed, `bot:${botId}`, exchange);
+}

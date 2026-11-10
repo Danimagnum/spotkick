@@ -35,7 +35,7 @@ test('a guest starts practice directly, reloads, verifies fairness and sees sett
     )).toBe(true);
     await page.getByText('Inspect match fairness', { exact: true }).click();
     await page.getByRole('button', { name: 'Verify match transcript' }).click();
-    await expect(page.getByText('Verified: seed, commitments and timeout choices match.')).toBeVisible();
+    await expect(page.getByText('Verified: seed, commitments, timeout and bot choices match.')).toBeVisible();
     await expect(page.getByTestId('balance')).toHaveText(/^(990|1,009\.4)$/);
     if (process.env.CAPTURE_PREVIEW)
         await page.screenshot({ path: 'docs/preview-match.png', fullPage: true });

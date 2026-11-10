@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { EntityManager } from 'typeorm';
-import { commitment, fairZone, hmac256, sha256, phaseFor, roundOf, pointsFor, winnerAfter, pvpPayout, isGoal, MatchView, Player, Zone, assertTransition } from '@spotkick/shared';
+import { botZone, commitment, fairZone, hmac256, sha256, phaseFor, roundOf, pointsFor, winnerAfter, pvpPayout, isGoal, MatchView, Player, Zone, assertTransition } from '@spotkick/shared';
 import { Database, event } from '../database/db';
 import { Ledger } from '../wallet/ledger';
 import { CoreRequestError } from '../wallet/core-client';
@@ -158,7 +158,7 @@ export class MatchEngine {
         if (s.phase.endsWith('_COMMIT')) {
             for (const p of s.players)
                 if (p.bot && !s.commits[p.id]) {
-                    const secret = { choice: await fairZone(s.seed, `bot:${p.id}`, s.exchange), salt: await hmac256(s.seed, `bot-salt:${p.id}:${s.exchange}`) };
+                    const secret = { choice: await botZone(s.seed, p.id, s.exchange), salt: await hmac256(s.seed, `bot-salt:${p.id}:${s.exchange}`) };
                     s.fallbacks[p.id] = secret;
                     s.commits[p.id] = await commitment(s.id, s.exchange, p.id, secret.choice, secret.salt);
                 }
