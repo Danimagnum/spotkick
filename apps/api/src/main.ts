@@ -16,7 +16,8 @@ async function main() {
     app.use(operations.middleware.bind(operations));
     app.enableCors({ origin: process.env.WEB_ORIGIN || 'http://localhost:3000', methods: ['GET', 'POST'], allowedHeaders: ['Content-Type', 'Authorization'] });
     app.useGlobalFilters(new ErrorFilter());
-    app.enableShutdownHooks();
+    // Docker runs Node as PID 1, where re-sending SIGTERM may be ignored after cleanup.
+    app.enableShutdownHooks(undefined, { useProcessExit: true });
     await app.listen(Number(process.env.PORT || (platformMode() ? 3000 : 3001)), '0.0.0.0');
 }
 main().catch(e => { console.error(e); process.exit(1); });

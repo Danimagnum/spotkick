@@ -114,7 +114,11 @@ export class ApiController {
 @WebSocketGateway({ cors: { origin: process.env.WEB_ORIGIN || 'http://localhost:3000' }, transports: ['websocket'], maxHttpBufferSize: 8192 })
 export class GameGateway implements OnGatewayInit, OnGatewayConnection {
     constructor(private identity: Identity, private engine: MatchEngine, private redis: RedisService, private runtime: Runtime) { }
-    afterInit(server: Server) { const pub = this.redis.client.duplicate(), sub = this.redis.client.duplicate(); server.adapter(createAdapter(pub, sub, platformMode() ? { key: redisKey('socket.io') } : undefined)); server.on('close', () => { pub.disconnect(); sub.disconnect(); }); this.runtime.start(server); }
+    afterInit(server: Server) {
+        server.adapter(createAdapter(this.redis.duplicate(), this.redis.duplicate(),
+            platformMode() ? { key: redisKey('socket.io') } : undefined));
+        this.runtime.start(server);
+    }
     async handleConnection(socket: Socket) {
         try {
             const user = await this.identity.auth(socket.handshake.auth.token);
