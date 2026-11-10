@@ -7,12 +7,21 @@ import { Ledger } from '../wallet/ledger';
 import { CoreRequestError } from '../wallet/core-client';
 import { Identity } from '../identity';
 import { RedisService } from '../redis';
+import { platformMode, redisKey } from '../platform-config';
+import { enqueuePlatformEvent } from '../platform/events';
 interface Secret {
     choice: Zone;
     salt: string;
 }
 export interface MatchState extends MatchView {
-    core?: { expiresAt: string; action?: 'reserve' | 'settle' | 'release'; cancel?: boolean; attempts?: number };
+    core?: {
+        expiresAt: string;
+        action?: 'reserve' | 'settle' | 'release';
+        cancel?: boolean;
+        attempts?: number;
+        decidedWinnerId?: string;
+        failure?: { action: 'reserve' | 'settle' | 'release'; code: string };
+    };
     seed: string;
     commits: Record<string, string>;
     reveals: Record<string, Secret>;
@@ -61,10 +70,10 @@ export class MatchEngine {
                 throw new Error('Cancel your existing queue first');
             await m.query('UPDATE users SET queue_stake=$2,queued_at=COALESCE(queued_at,$3) WHERE id=$1', [user, stake, Date.now()]);
         });
-        await this.redis.client.zadd('spotkick:queue', 'NX', Date.now(), user);
+        await this.redis.client.zadd(redisKey('queue'), 'NX', Date.now(), user);
         return { queued: true, stake };
     }
-    async cancel(user: string) { await this.db.source.query('UPDATE users SET queue_stake=NULL,queued_at=NULL WHERE id=$1', [user]); await this.redis.client.zrem('spotkick:queue', user); return { queued: false }; }
+    async cancel(user: string) { await this.db.source.query('UPDATE users SET queue_stake=NULL,queued_at=NULL WHERE id=$1', [user]); await this.redis.client.zrem(redisKey('queue'), user); return { queued: false }; }
     async practice(user: string, stake: number) {
         if (this.identity.core.enabled) throw new Error('Practice is available in play-money mode only');
         return this.db.tx(async (m) => {
@@ -87,10 +96,10 @@ export class MatchEngine {
         if (waiting.length) {
             const batch = this.redis.client.multi();
             for (const u of waiting)
-                batch.zadd('spotkick:queue', 'NX', u.queued_at, u.id);
+                batch.zadd(redisKey('queue'), 'NX', u.queued_at, u.id);
             await batch.exec();
         }
-        const ids = await this.redis.client.zrange('spotkick:queue', 0, 49);
+        const ids = await this.redis.client.zrange(redisKey('queue'), 0, 49);
         if (!ids.length)
             return;
         await this.db.tx(async (m) => {
@@ -113,7 +122,7 @@ export class MatchEngine {
         }) => x.id));
         const stale = ids.filter(id => !stillWaiting.has(id));
         if (stale.length)
-            await this.redis.client.zrem('spotkick:queue', ...stale);
+            await this.redis.client.zrem(redisKey('queue'), ...stale);
     }
     async create(m: EntityManager, players: Player[], stake: number) {
         players = players.map(({id,name,bot}) => ({id,name,bot}));
@@ -197,12 +206,14 @@ export class MatchEngine {
                 const p = pvpPayout(s.stake, s.rakeBps);
                 s.winner = s.players[winner].id;
                 if (s.core) {
+                    s.core.decidedWinnerId = s.winner;
                     s.core.action = 'settle';
                     s.deadline = now;
                     return;
                 }
                 s.payout = p.payout;
                 await this.ledger.post(m, `match:${s.id}:settle`, 'SETTLED', s.id, [{ account: `escrow:${s.id}`, amount: -BigInt(p.pot) }, { account: `user:${s.winner}`, amount: BigInt(p.payout) }, ...(p.rake ? [{ account: 'house:rake', amount: BigInt(p.rake) }] : [])]);
+                s.settlementId = randomUUID();
                 this.transition(s, 'SETTLED', now);
                 s.timeoutSeed = s.seed;
                 await m.query('UPDATE users SET active_game=NULL WHERE active_game=$1', [`match:${s.id}`]);
@@ -245,52 +256,86 @@ export class MatchEngine {
             return this.view(s);
         });
     }
-    async tick() {
+    async tick(stopping = () => false) {
         const active = await this.db.source.query("SELECT id FROM matches WHERE status NOT IN ('SETTLED','ABANDONED')");
-        for (const { id } of active)
+        for (const { id } of active) {
+            if (stopping()) break;
+            await this.tickMatch(id);
+        }
+    }
+
+    private async tickMatch(id: string) {
+        let reserved = false;
+        try {
             await this.db.tx(async (m) => {
                 const [r] = await m.query('SELECT state FROM matches WHERE id=$1 FOR UPDATE SKIP LOCKED', [id]);
                 if (!r) return;
                 const s = r.state as MatchState;
                 const now = Date.now();
-                if (now < s.deadline) return;
+                if (now < s.deadline || s.core?.failure) return;
                 if (s.core && (s.core.action || now >= Date.parse(s.core.expiresAt))) {
                     s.core.action ??= 'release';
-                    await this.processCore(m, s);
+                    await this.processCore(m, s, () => { reserved = true; });
                 } else {
                     await this.drive(m, s, now);
                 }
                 await this.persist(m, s);
             });
+        } catch (error) {
+            if (reserved) {
+                await this.db.tx(async m => {
+                    const [row] = await m.query('SELECT state FROM matches WHERE id=$1 FOR UPDATE', [id]);
+                    const state = row?.state as MatchState | undefined;
+                    // A lost COMMIT response is possible. Compensate only if the reservation is still unapplied.
+                    if (state?.phase !== 'MATCHED' || state.core?.action !== 'reserve') return;
+                    state.core.action = 'release';
+                    state.walletIssue = 'wallet_unavailable';
+                    state.deadline = Date.now();
+                    await this.persist(m, state);
+                });
+            }
+            throw error;
+        }
     }
-    private async processCore(m: EntityManager, s: MatchState) {
+    private async processCore(m: EntityManager, s: MatchState, onReserved: () => void) {
         const state = s.core!;
         const action = state.action!;
         let result;
         try {
             result = await this.identity.core.match(s.id, action, action === 'reserve'
                 ? { userIds: s.players.map(player => player.id), amount: String(s.stake), expiresAt: state.expiresAt }
-                : action === 'settle' ? { winnerId: s.winner, rakeBps: s.rakeBps } : {});
+                : action === 'settle' ? { winnerId: state.decidedWinnerId ?? s.winner, rakeBps: s.rakeBps } : {});
         } catch (error) {
-            if (error instanceof CoreRequestError) {
-                if (action === 'reserve' && [
-                    'kyc_required', 'account_restricted', 'loss_limit_exceeded', 'insufficient_funds',
-                    'hold_expired', 'currency_not_supported', 'wallet_not_found',
-                ].includes(error.code)) {
-                    await this.abandonCoreMatch(m, s);
-                    return;
-                }
-                if (action === 'settle' && error.code === 'hold_expired') state.action = 'release';
+            const failure = error instanceof CoreRequestError ? error : undefined;
+            if (action === 'reserve' && failure && [400, 403, 404, 422].includes(failure.status)) {
+                s.walletIssue = failure.status === 403 && failure.code !== 'forbidden'
+                    ? 'responsible_gaming' : failure.code === 'insufficient_funds' ? 'insufficient_funds' : 'wallet_unavailable';
+                await this.abandonCoreMatch(m, s);
+                return;
+            }
+            if (action === 'settle' && failure?.code === 'hold_expired') {
+                state.decidedWinnerId ??= s.winner;
+                state.action = 'release';
+                s.walletIssue = 'wallet_unavailable';
+                s.deadline = Date.now();
+                return;
+            }
+            if (!failure?.retryable) {
+                state.failure = { action, code: failure?.code ?? 'client_error' };
+                s.walletIssue = 'wallet_unavailable';
+                console.error(JSON.stringify({ event: 'core.match.reconciliation_required', matchId: s.id, ...state.failure }));
+                return;
             }
             state.attempts = (state.attempts ?? 0) + 1;
             if (state.attempts === 1)
                 console.warn(JSON.stringify({ event: 'core.match.retry', matchId: s.id, action, code: error instanceof CoreRequestError ? error.code : 'transport_error' }));
-            s.deadline = Date.now() + Math.min(30_000, 1000 * 2 ** Math.min(state.attempts, 5));
+            s.deadline = Date.now() + Math.max(failure.retryAfterMs, Math.min(30_000, 1000 * 2 ** Math.min(state.attempts, 5)));
             return;
         }
         delete state.attempts;
         const now = Date.now();
         if (action === 'reserve') {
+            onReserved();
             if (state.cancel || now >= Date.parse(state.expiresAt)) {
                 state.action = 'release';
                 s.deadline = now;
@@ -299,14 +344,22 @@ export class MatchEngine {
                 this.transition(s, 'STAKES_LOCKED', now);
                 this.transition(s, phaseFor(0), now);
                 s.deadline = now + choiceMs();
+                if (platformMode()) await enqueuePlatformEvent(m, 'spotkick.match.started.v1', s.id,
+                    { matchId: s.id, participantIds: s.players.map(player => player.id) }, new Date(now));
             }
         } else if (action === 'settle') {
             s.payout = Number(result.payout);
+            s.settlementId = randomUUID();
             this.transition(s, 'SETTLED', now);
             s.timeoutSeed = s.seed;
             await this.clearCoreMatch(m, s);
+            if (platformMode()) await enqueuePlatformEvent(m, 'spotkick.match.settled.v1', s.id,
+                { matchId: s.id, settlementId: s.settlementId, result: 'win', winnerId: s.winner }, new Date(now));
         } else {
+            s.settlementId = randomUUID();
             await this.abandonCoreMatch(m, s);
+            if (platformMode()) await enqueuePlatformEvent(m, 'spotkick.match.settled.v1', s.id,
+                { matchId: s.id, settlementId: s.settlementId, result: 'cancelled' }, new Date(now));
         }
     }
     private async clearCoreMatch(m: EntityManager, s: MatchState) {
@@ -336,6 +389,7 @@ export class MatchEngine {
                 return;
             }
             await this.ledger.post(m, `match:${id}:refund`, 'REFUND', id, [{ account: `escrow:${id}`, amount: -BigInt(s.pot) }, ...s.players.map(p => ({ account: `user:${p.id}`, amount: BigInt(s.stake) }))]);
+            s.settlementId = randomUUID();
             this.transition(s, 'ABANDONED', Date.now());
             await m.query('UPDATE users SET active_game=NULL WHERE active_game=$1', [`match:${id}`]);
             await this.persist(m, s);

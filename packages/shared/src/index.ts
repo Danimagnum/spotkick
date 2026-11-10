@@ -46,6 +46,8 @@ export interface MatchView {
     results: ExchangeResult[];
     winner?: string;
     payout?: number;
+    settlementId?: string;
+    walletIssue?: 'responsible_gaming' | 'insufficient_funds' | 'wallet_unavailable';
     timeoutSeedHash: string;
     timeoutSeed?: string;
 }

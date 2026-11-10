@@ -9,7 +9,7 @@ import { MatchEngine, MatchState } from '../../apps/api/src/matches/engine';
 import { SoloService } from '../../apps/api/src/solo/solo';
 const db = new Database(), ledger = new Ledger(), identity = new Identity(db, ledger), redis = new RedisService(), engine = new MatchEngine(db, ledger, identity, redis), solo = new SoloService(db, ledger);
 beforeAll(async () => { await db.onModuleInit(); await redis.client.ping(); process.env.BOT_AFTER_MS = '0'; process.env.RESULT_MS = '0'; });
-afterAll(async () => { redis.client.disconnect(); await db.onModuleDestroy(); });
+afterAll(async () => { redis.client.disconnect(); await db.onApplicationShutdown(); });
 const balance = (id: string) => ledger.balance(db.source.manager, id);
 async function advance(id: string) { return db.tx(async (m) => { const [r] = await m.query('SELECT state FROM matches WHERE id=$1 FOR UPDATE', [id]); const s = r.state as MatchState; await engine.drive(m, s, Math.max(Date.now(), s.deadline + 1)); await engine.persist(m, s); return engine.view(s); }); }
 describe('PostgreSQL journal under contention', () => {
