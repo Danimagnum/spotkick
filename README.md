@@ -225,7 +225,7 @@ The load script implements Engine.IO v4 / Socket.IO envelopes with built-in k6 W
 
 ## Platform integration
 
-Standalone is the default, including when CORE_URL is present. Set PLATFORM_MODE=true explicitly for Core identity, grouped wallet commands and Kafka. The API pins **@danigil/platform-contracts 0.2.0**; see [Platform Core mode](docs/PLATFORM_CORE.md). `pnpm test:contract` checks the published contract kit and adapters; `pnpm test:mutations` checks that deliberate regressions are detected against isolated test dependencies. Updated Core failure evidence, expanded load figures and mobile acceptance remain pending.
+Standalone is the default, including when CORE_URL is present. Set PLATFORM_MODE=true explicitly for Core identity, grouped wallet commands and Kafka. The API pins **@danigil/platform-contracts 0.2.0**; see [Platform Core mode](docs/PLATFORM_CORE.md). `pnpm test:contract` checks the published contract kit and adapters; `pnpm test:mutations` checks that deliberate regressions are detected against isolated test dependencies. Core is not yet tagged and its payout-from-house, partial-capture and permissions APIs remain incomplete. Real-Core acceptance is gated on Core v0.2.0; expanded load figures and mobile acceptance also remain pending.
 
 ## Configuration and observability
 
@@ -245,6 +245,10 @@ Standalone is the default, including when CORE_URL is present. Set PLATFORM_MODE
 | `NEXT_PUBLIC_SENTRY_DSN` | Empty | Browser reporting; rebuild web to change |
 
 Sentry initializes before NestJS imports and through Next.js server/client instrumentation. DSNs are optional; reporting is disabled when absent. Request bodies, authorization and cookies are stripped from API error events. No seed values or bearer tokens are intentionally logged. The runtime emits structured JSON failures. Browser and database tracing need operational review before handling sensitive production identities. No real Sentry delivery has been verified without a DSN.
+
+### Service metrics
+
+The Prometheus endpoint includes active matches from PostgreSQL (use max across replicas), local Socket.IO connections (sum across replicas), resolution processing latency in seconds, and settlement failure attempts by mode. Counters and histograms reset on restart. Readiness returns 503 when dependencies fail while liveness stays 200. Platform health events report startup, observed state changes and 30-second heartbeats through the outbox. See [operational semantics](docs/PLATFORM_CORE.md#game-metrics).
 
 ## How it scales
 

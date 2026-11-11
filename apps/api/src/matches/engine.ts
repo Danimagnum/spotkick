@@ -1,3 +1,4 @@
+import { GameMetrics } from '../platform/game-metrics';
 import { Injectable } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { EntityManager } from 'typeorm';
@@ -43,7 +44,7 @@ export const revealMs = () => Number(process.env.REVEAL_MS || 3000);
 const queueKey = (core: boolean) => redisKey(core ? 'queue:core' : 'queue');
 @Injectable()
 export class MatchEngine {
-    constructor(private db: Database, private ledger: Ledger, private identity: Identity, private redis: RedisService) { }
+    constructor(private db: Database, private ledger: Ledger, private identity: Identity, private redis: RedisService, private metrics: GameMetrics = new GameMetrics()) { }
     view(s: MatchState): MatchView & {
         audit?: MatchState['audit'];
     } {
@@ -160,6 +161,12 @@ export class MatchEngine {
     }
     async fallback(s: MatchState, user: string): Promise<Secret> { return { choice: await fairZone(s.seed, `timeout:${s.id}:${user}`, s.exchange), salt: await hmac256(s.seed, `salt:${s.exchange}:${user}`) }; }
     async drive(m: EntityManager, s: MatchState, now: number) {
+        const resolvedBefore = s.results.length;
+        const started = performance.now();
+        try { return await this.advance(m, s, now); }
+        finally { if (s.results.length > resolvedBefore) this.metrics.resolution(performance.now() - started); }
+    }
+    private async advance(m: EntityManager, s: MatchState, now: number) {
         if (s.phase === 'SETTLED' || s.phase === 'ABANDONED')
             return;
         if (s.phase === 'RESOLVED') {
@@ -223,7 +230,8 @@ export class MatchEngine {
                     return;
                 }
                 s.payout = p.payout;
-                await this.ledger.post(m, `match:${s.id}:settle`, 'SETTLED', s.id, [{ account: `escrow:${s.id}`, amount: -BigInt(p.pot) }, { account: `user:${s.winner}`, amount: BigInt(p.payout) }, ...(p.rake ? [{ account: 'house:rake', amount: BigInt(p.rake) }] : [])]);
+                try { await this.ledger.post(m, `match:${s.id}:settle`, 'SETTLED', s.id, [{ account: `escrow:${s.id}`, amount: -BigInt(p.pot) }, { account: `user:${s.winner}`, amount: BigInt(p.payout) }, ...(p.rake ? [{ account: 'house:rake', amount: BigInt(p.rake) }] : [])]); }
+                catch (error) { this.metrics.settlementError('standalone'); throw error; }
                 s.settlementId = randomUUID();
                 this.transition(s, 'SETTLED', now);
                 s.timeoutSeed = s.seed;
@@ -321,6 +329,7 @@ export class MatchEngine {
                     ? await this.identity.core.match(s.id, action, { winnerId: state.decidedWinnerId ?? s.winner!, rakeBps: s.rakeBps })
                     : await this.identity.core.match(s.id, action);
         } catch (error) {
+            if (action === 'settle') this.metrics.settlementError('platform');
             const failure = error instanceof CoreRequestError ? error : undefined;
             if (action === 'reserve' && failure && [400, 403, 404, 422].includes(failure.status)) {
                 s.walletIssue = failure.status === 403 && failure.code !== 'forbidden'

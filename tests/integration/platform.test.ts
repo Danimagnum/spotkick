@@ -1,3 +1,4 @@
+import { GameMetrics } from '../../apps/api/src/platform/game-metrics';
 import { validateWalletRequest, validateWalletResponse, validateContractEvent } from '@danigil/platform-contracts/testing';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
@@ -20,6 +21,7 @@ let server: Server;
 let base: string;
 let redis: RedisService;
 let engine: MatchEngine;
+let metrics: GameMetrics;
 let fail: { action: Action; status: number; code: string; retryAfter?: string } | undefined;
 let drop: Action | undefined;
 let tokenRequests = 0;
@@ -102,7 +104,8 @@ beforeEach(() => {
     vi.stubEnv('RESULT_MS', '0');
     vi.stubEnv('RAKE_BPS', '300');
     const ledger = new Ledger();
-    engine = new MatchEngine(db, ledger, new Identity(db, ledger, new CoreClient()), redis);
+    metrics = new GameMetrics();
+    engine = new MatchEngine(db, ledger, new Identity(db, ledger, new CoreClient()), redis, metrics);
     fail = undefined;
     drop = undefined;
     tokenRequests = 0;
@@ -237,6 +240,8 @@ it('replays one grouped hold, preserves the winning decision during an outage an
         expect(new Set(attempts.map(call => call.request)).size).toBe(1);
     }
     expect(tokenRequests).toBe(1);
+    expect(metrics.render()).toContain('spotkick_settlement_errors_total{mode="platform"} 2');
+    expect(metrics.render()).toContain('spotkick_resolution_duration_seconds_count 6');
 });
 
 it.each([

@@ -1,3 +1,4 @@
+import { GameMetrics } from './platform/game-metrics';
 import { Module } from '@nestjs/common';
 import { Database } from './database/db';
 import { Ledger } from './wallet/ledger';
@@ -13,7 +14,7 @@ import { PlatformRelay } from './platform/relay';
 import { Operations, OperationsController } from './platform/operations';
 @Module({ controllers: [ApiController, OperationsController], providers: [
     Database, Ledger, CoreClient, Identity, RedisService, MatchEngine, SoloService, Runtime, GameGateway,
-    KafkaTransport, PlatformRelay, Operations,
+    KafkaTransport, PlatformRelay, Operations, GameMetrics,
 ] })
 export class AppModule {
 }

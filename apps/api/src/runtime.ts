@@ -1,4 +1,5 @@
 import { Injectable, BeforeApplicationShutdown, OnApplicationBootstrap } from '@nestjs/common';
+import { GameMetrics } from './platform/game-metrics';
 import { Server } from 'socket.io';
 import * as Sentry from '@sentry/node';
 import { Database } from './database/db';
@@ -14,8 +15,8 @@ export class Runtime implements BeforeApplicationShutdown, OnApplicationBootstra
     private stopping = false;
     private pending?: Promise<void>;
     private pulses = 0;
-    constructor(private db: Database, private redis: RedisService, private engine: MatchEngine) { }
-    start(server: Server) { this.server = server; }
+    constructor(private db: Database, private redis: RedisService, private engine: MatchEngine, private metrics: GameMetrics = new GameMetrics()) { }
+    start(server: Server) { this.server = server; this.metrics.connections = () => server.engine?.clientsCount ?? 0; }
     onApplicationBootstrap() { this.timer = setInterval(() => {
         if (!this.pending) this.pending = this.tick().finally(() => { this.pending = undefined; });
     }, 250); }

@@ -26,7 +26,7 @@ The API pins `@danigil/platform-contracts@0.2.0` from npm. Events use its Zod re
 
 - `spotkick.match.started.v1` follows confirmation of both stakes.
 - `spotkick.match.settled.v1` follows a confirmed payment or refund. It includes the persisted `settlementId`. A tie in regulation continues into sudden death.
-- `system.health.reported.v1` is recorded every 30 seconds while PostgreSQL is available. Its HTTP latency and error rate use the trailing minute and exclude probes and metrics scrapes.
+- `system.health.reported.v1` is recorded on startup, every 30 seconds and on observed state changes (one-second polling, with dependency probe caching). Pending reports survive database reconnection in a bounded in-memory queue of 64 samples; process termination before outbox insertion loses those samples. Once inserted, outbox delivery is durable. A full queue logs platform.health.queue_full and defers further observations until drained. Its HTTP latency and error rate use the trailing minute and exclude probes and metrics scrapes.
 
 `/health` keeps its demo contract. Use `/health/live` for process liveness, `/health/ready` for dependency and migration readiness, and `/metrics` for Prometheus counters and histogram buckets. Readiness returns HTTP 503 during dependency outages and migration startup. Concurrent requests share the probes, and results are cached for one second. Health events estimate latency p95 from fixed histogram buckets over the trailing minute, with one-second resolution at the window boundary. The API can be run as UID/GID 1000 on a read-only root filesystem with `/tmp` writable.
 
@@ -58,3 +58,15 @@ The test provisions disposable verified users and a scoped client. A loopback HT
 `pnpm test:contract` runs the official package test kit and adapter tests. Integration tests validate actual outgoing grouped requests and stored outbox payloads; fixtures include the contract HTTP statuses and machine-token fields. `pnpm test:mutations` deliberately breaks opt-in, event validation and money idempotency and requires assertion failures before restoring each source file. Run it with the same isolated PostgreSQL and Redis as integration tests. CI runs both commands.
 
 The existing `/api/v1/spotkick/users/:id/wallet` summary and identity/login routes are Core-specific read adapters, outside the package wallet OpenAPI. Their small response validators remain local; no money-write or JWT claim contract is duplicated.
+
+## Game metrics
+
+`spotkick_active_matches` counts nonterminal matches for the current mode in PostgreSQL; all replicas see the same count, so aggregate with `max`, never `sum`. A failed/unavailable database query exposes NaN instead of a stale zero. Scrapes share a query and cache its result for one second.
+
+`spotkick_socket_connections` is the local Engine.IO connection count, including handshakes. Sum it across replicas. `spotkick_resolution_duration_seconds` measures processing attempts that resolve an exchange, excluding player wait, row-lock wait before drive and transaction commit. Rolled-back attempts can appear. `spotkick_settlement_errors_total{mode="standalone|platform"}` counts failed ledger/Core settlement attempts; retries count separately. Histograms/counters reset on process restart; use Prometheus rate/increase.
+
+Health remains process liveness (200) when PostgreSQL or Redis is unavailable; readiness returns 503. Integration tests close actual database and Redis connections, check HTTP responses and recovery, authenticate a real Socket.IO connection, compare the active-match gauge with SQL, and validate periodic/change events in the real PostgreSQL outbox. The Core/broker readiness values in that event-specific test are controlled doubles, not Core compatibility evidence.
+
+## Core release gate
+
+Platform Core is not yet tagged. Payout from house, partial capture and the permissions API in /api/v1 remain incomplete according to the owner. The service integration stays open until Core v0.2.0 is supplied and real-Core fault tests pass. Do not enable the public demo or staging against an unverified Core release.

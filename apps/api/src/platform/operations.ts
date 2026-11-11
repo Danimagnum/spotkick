@@ -1,4 +1,6 @@
 import { Controller, Get, Header, Injectable, ServiceUnavailableException, type BeforeApplicationShutdown, type OnApplicationBootstrap } from '@nestjs/common';
+import { GameMetrics } from './game-metrics';
+import type { EventData } from '@danigil/platform-contracts';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Database } from '../database/db';
@@ -10,7 +12,7 @@ import { KafkaTransport } from './kafka';
 
 const buckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 const probePaths = new Set(['/health', '/health/live', '/health/ready', '/metrics']);
-type Health = 'healthy' | 'degraded' | 'unhealthy';
+type Health = EventData<'system.health.reported.v1'>['status'];
 type WindowBucket = { at: number; count: number; failed: number; bins: number[]; maxima: number[] };
 
 async function probe(operation: Promise<unknown>): Promise<boolean> {
@@ -37,16 +39,26 @@ export class Operations implements OnApplicationBootstrap, BeforeApplicationShut
     private timer?: NodeJS.Timeout;
     private pending?: Promise<void>;
     private stopping = false;
+    private lastObserved?: Health;
+    private readonly healthQueue: { status: Health; at: Date }[] = [];
+    private lastReportAt = 0;
+    private gameRefresh?: Promise<void>;
+    private gameQuery?: Promise<number>;
+    private gameRefreshUntil = 0;
 
-    constructor(private db: Database, private redis: RedisService, private kafka: KafkaTransport, private core: CoreClient) {}
+    constructor(private db: Database, private redis: RedisService, private kafka: KafkaTransport, private core: CoreClient, private game: GameMetrics = new GameMetrics()) {}
 
     onApplicationBootstrap() {
-        if (platformMode()) this.timer = setInterval(() => {
+        if (!platformMode()) return;
+        this.scheduleReport();
+        this.timer = setInterval(() => this.scheduleReport(), 1000);
+    }
+
+    private scheduleReport() {
             if (this.stopping || this.pending || !this.db.ready) return;
             this.pending = this.report().catch(() => {
                 console.warn(JSON.stringify({ event: 'platform.health.enqueue_failed' }));
             }).finally(() => { this.pending = undefined; });
-        }, 30_000);
     }
 
     middleware(req: IncomingMessage, res: ServerResponse, next: () => void) {
@@ -107,8 +119,25 @@ export class Operations implements OnApplicationBootstrap, BeforeApplicationShut
             `http_request_duration_seconds_bucket{le="+Inf"} ${this.count}`,
             `http_request_duration_seconds_count ${this.count}`,
             `http_request_duration_seconds_sum ${this.duration}`,
-            '',
+            this.game.render(),
         ].join('\n');
+    }
+
+    async refreshGameMetrics() {
+        if (this.gameRefresh && Date.now() < this.gameRefreshUntil) return this.gameRefresh;
+        this.gameRefreshUntil = Infinity;
+        this.gameRefresh = (async () => {
+            this.game.activeMatches = NaN;
+            if (!this.db.ready) return;
+            let count = NaN;
+            this.gameQuery ??= this.db.source.query(
+                "SELECT COUNT(*)::int AS count FROM matches WHERE status NOT IN ('SETTLED','ABANDONED') AND (state ? 'core')=$1",
+                [platformMode()],
+            ).then(rows => rows[0].count).finally(() => { this.gameQuery = undefined; });
+            const ok = await probe(this.gameQuery.then(value => { count = value; }));
+            this.game.activeMatches = ok ? count : NaN;
+        })().finally(() => { this.gameRefreshUntil = Date.now() + 1000; });
+        return this.gameRefresh;
     }
 
     private dependency(name: string, check: () => Promise<unknown>) {
@@ -143,9 +172,25 @@ export class Operations implements OnApplicationBootstrap, BeforeApplicationShut
         const status = await this.status();
         if (this.stopping) return;
         const now = new Date();
+        if (status !== this.lastObserved) {
+            if (this.healthQueue.length >= 64) {
+                console.warn(JSON.stringify({ event: 'platform.health.queue_full' }));
+                return;
+            }
+            this.healthQueue.push({ status, at: now });
+            this.lastObserved = status;
+        } else if (!this.healthQueue.length && now.getTime() - this.lastReportAt >= 30_000) {
+            this.healthQueue.push({ status, at: now });
+        }
+        const batch = [...this.healthQueue];
+        if (!batch.length) return;
         const service = serviceName();
-        await this.db.tx(tx => enqueuePlatformEvent(tx, 'system.health.reported.v1', service,
-            { service, status, ...this.window(now.getTime()) }, now, randomUUID()));
+        await this.db.tx(async tx => {
+            for (const sample of batch) await enqueuePlatformEvent(tx, 'system.health.reported.v1', service,
+                { service, status: sample.status, ...this.window(sample.at.getTime()) }, sample.at, randomUUID());
+        });
+        this.healthQueue.splice(0, batch.length);
+        this.lastReportAt = now.getTime();
     }
 
     async beforeApplicationShutdown() {
@@ -170,5 +215,5 @@ export class OperationsController {
 
     @Get('metrics')
     @Header('Content-Type', 'text/plain; version=0.0.4; charset=utf-8')
-    metrics() { return this.operations.metrics(); }
+    async metrics() { await this.operations.refreshGameMetrics(); return this.operations.metrics(); }
 }

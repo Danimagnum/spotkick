@@ -12,12 +12,13 @@ export class KafkaTransport implements OnApplicationShutdown {
     }) : undefined;
     private readonly producer: Producer | undefined = this.kafka?.producer();
     private readonly admin: Admin | undefined = this.kafka?.admin();
+    private stopping = false;
     private producerReady?: Promise<void>;
     private adminReady?: Promise<void>;
     private probe?: { expiresAt: number; result: Promise<boolean> };
 
     async publish(topic: PlatformTopic, key: string, payload: unknown) {
-        if (!this.producer) throw new Error('Kafka is disabled');
+        if (this.stopping || !this.producer) throw new Error('Kafka is unavailable');
         assertPlatformEvent(topic, payload);
         this.producerReady ??= this.producer.connect().catch(error => {
             this.producerReady = undefined;
@@ -32,6 +33,7 @@ export class KafkaTransport implements OnApplicationShutdown {
     }
 
     ready() {
+        if (this.stopping) return Promise.resolve(false);
         if (!this.admin) return Promise.resolve(true);
         if (!this.probe || this.probe.expiresAt <= Date.now()) {
             const result = this.checkBroker(this.admin);
@@ -54,6 +56,7 @@ export class KafkaTransport implements OnApplicationShutdown {
     }
 
     async onApplicationShutdown() {
+        this.stopping = true;
         await Promise.allSettled([this.producer?.disconnect(), this.admin?.disconnect()]);
     }
 }
