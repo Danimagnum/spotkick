@@ -250,6 +250,12 @@ Sentry initializes before NestJS imports and through Next.js server/client instr
 
 The Prometheus endpoint includes active matches from PostgreSQL (use max across replicas), local Socket.IO connections (sum across replicas), resolution processing latency in seconds, and settlement failure attempts by mode. Counters and histograms reset on restart. Readiness returns 503 when dependencies fail while liveness stays 200. Platform health events report startup, observed state changes and 30-second heartbeats through the outbox. See [operational semantics](docs/PLATFORM_CORE.md#game-metrics).
 
+### Images and secret scanning
+
+CI scans the entire Git history and current files with Gitleaks v8.30.1 pinned by digest. Its positive control must detect a generated disposable private key; logs are redacted. Run `pnpm test:secrets` from the repository root with Docker available. No allowlist suppresses findings.
+
+After verify and secrets pass, a push to this PR branch or main publishes `ghcr.io/danimagnum/spotkick-api:sha-<full commit SHA>` for linux/amd64. Publication has no deployment step. It disables attestations/SBOM attachments, forces Docker gzip layers and verifies the remote manifest and a read-only standalone container. The frontend image still requires a build for its actual browser API URL; the public demo is not rebuilt by this job. See [pending platform-infra additions](docs/platform-infra-additions.md) for PC/NAS integration, Prometheus and transfer checks. Core integration and merge remain gated on Core v0.2.0.
+
 ## How it scales
 
 - **API instances:** durable state and database deadlines allow horizontal API replication. Use a reverse proxy, health checks and WebSocket-aware connection draining. The Redis adapter fans room events across instances; recovery always retrieves a durable snapshot.

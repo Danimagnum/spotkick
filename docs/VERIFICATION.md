@@ -62,3 +62,11 @@ Not yet verified for this revision: the exact published Core image (tag/digest n
 Executed locally against isolated Docker PostgreSQL 17 and Redis 7.4: 16 integration tests passed, including two new operational tests. HTTP readiness changed 200 → 503 → 200 when actual Redis and PostgreSQL connections were closed/reopened; liveness stayed 200. A real authenticated Socket.IO connection changed the local gauge 0 → 1 → 0. Active-match metrics matched SQL; an unavailable database exposed NaN. The PostgreSQL health outbox contained initial, degraded, recovered and periodic 30-second facts validated by the 0.2.0 kit. Broker and Core probe values in this health-event test were controlled doubles. Resolution and settlement-error metrics were asserted during the grouped-wallet fault suite.
 
 Six deliberate mutations were detected (readiness dependencies, health changes, resolution metrics, standalone opt-in, event validation and stable idempotency). None of these checks certifies the unfinished Core release. The owner has explicitly left Core integration and PR merge pending Core v0.2.0.
+
+## Kafka and secret scanning, 11 November 2026
+
+The complete local integration command passed 17 tests with real isolated PostgreSQL 17, Redis 7.4 and Redpanda v24.3.18. The Kafka test reads an event from the PostgreSQL outbox, publishes it twice and verifies the same envelope ID, aggregate key, event-id and correlation-id on both received records; shutdown readiness is false. CI provisions isolated Apache Kafka 4.1.0 KRaft for that same test. The opt-in Core test remains skipped explicitly. Unit/contract tests: 19 passed. Full monorepo typecheck passed.
+
+Gitleaks v8.30.1 (official image digest c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f) detected its generated disposable private-key control; full Git history and current tracked/unignored files had no findings. Logs are redacted; no real credential was introduced for the control. Actionlint 1.7.12 validated the publication workflow.
+
+GHCR publication/manifest/image smoke are pending their first workflow execution at the time of this entry. NAS import and resources are not verified. No platform-infra files, NAS services or demo images were modified. Required changes are proposals in platform-infra-additions.md; they are not applied configuration.
