@@ -37,7 +37,7 @@ it('serves real probes and live connection/database gauges, failing readiness fo
         const response = await fetch(base + '/metrics');
         const text = await response.text();
         expect(response.headers.get('content-type')).toContain('text/plain');
-        expect(text).toContain('spotkick_socket_connections 1');
+        expect(text.split('\n')).toContain('spotkick_socket_connections 1');
         const [row] = await db.source.query("SELECT COUNT(*)::int AS count FROM matches WHERE status NOT IN ('SETTLED','ABANDONED') AND NOT (state ? 'core')");
         expect(text).toContain('spotkick_active_matches ' + row.count);
     } finally { socket.disconnect(); }
