@@ -313,9 +313,13 @@ export class MatchEngine {
         const action = state.action!;
         let result;
         try {
-            result = await this.identity.core.match(s.id, action, action === 'reserve'
-                ? { userIds: s.players.map(player => player.id), amount: String(s.stake), expiresAt: state.expiresAt }
-                : action === 'settle' ? { winnerId: state.decidedWinnerId ?? s.winner, rakeBps: s.rakeBps } : {});
+            result = action === 'reserve'
+                ? await this.identity.core.match(s.id, action, {
+                    userIds: [s.players[0].id, s.players[1].id], amount: String(s.stake), expiresAt: state.expiresAt,
+                })
+                : action === 'settle'
+                    ? await this.identity.core.match(s.id, action, { winnerId: state.decidedWinnerId ?? s.winner!, rakeBps: s.rakeBps })
+                    : await this.identity.core.match(s.id, action);
         } catch (error) {
             const failure = error instanceof CoreRequestError ? error : undefined;
             if (action === 'reserve' && failure && [400, 403, 404, 422].includes(failure.status)) {
@@ -359,15 +363,16 @@ export class MatchEngine {
                     { matchId: s.id, participantIds: s.players.map(player => player.id) }, new Date(now));
             }
         } else if (action === 'settle') {
+            if (!('payout' in result)) throw new Error('Missing settlement payout');
             s.payout = Number(result.payout);
-            s.settlementId = randomUUID();
+            s.settlementId = `match:${s.id}:${action}`;
             this.transition(s, 'SETTLED', now);
             s.timeoutSeed = s.seed;
             await this.clearCoreMatch(m, s);
             if (platformMode()) await enqueuePlatformEvent(m, 'spotkick.match.settled.v1', s.id,
                 { matchId: s.id, settlementId: s.settlementId, result: 'win', winnerId: s.winner }, new Date(now));
         } else {
-            s.settlementId = randomUUID();
+            s.settlementId = `match:${s.id}:${action}`;
             await this.abandonCoreMatch(m, s);
             if (platformMode()) await enqueuePlatformEvent(m, 'spotkick.match.settled.v1', s.id,
                 { matchId: s.id, settlementId: s.settlementId, result: 'cancelled' }, new Date(now));

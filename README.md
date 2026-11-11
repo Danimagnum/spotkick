@@ -223,6 +223,10 @@ k6 run -e VUS=12 -e DURATION=1s -e API_URLS=http://localhost:3001,http://localho
 
 The load script implements Engine.IO v4 / Socket.IO envelopes with built-in k6 WebSockets. It creates guest wallets, queues real players, commits/reveals every exchange and checks final wallet arithmetic. Odd queues exercise delayed bots. Thresholds: match success >95%, HTTP failures <1%, match p95 <150 seconds. These are demo test gates, not published capacity claims. Sudden death is unbounded by the rules; a sufficiently long tie can exceed the load-test timeout.
 
+## Platform integration
+
+Standalone is the default, including when CORE_URL is present. Set PLATFORM_MODE=true explicitly for Core identity, grouped wallet commands and Kafka. The API pins **@danigil/platform-contracts 0.2.0**; see [Platform Core mode](docs/PLATFORM_CORE.md). `pnpm test:contract` checks the published contract kit and adapters; `pnpm test:mutations` checks that deliberate regressions are detected against isolated test dependencies. Updated Core failure evidence, expanded load figures and mobile acceptance remain pending.
+
 ## Configuration and observability
 
 | Variable | Default | Meaning |

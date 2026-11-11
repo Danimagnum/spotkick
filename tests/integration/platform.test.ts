@@ -1,3 +1,4 @@
+import { validateWalletRequest, validateWalletResponse, validateContractEvent } from '@danigil/platform-contracts/testing';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
@@ -13,7 +14,7 @@ import { CoreClient } from '../../apps/api/src/wallet/core-client';
 import { Ledger } from '../../apps/api/src/wallet/ledger';
 
 type Action = 'reserve' | 'settle' | 'release';
-type Reply = { status: string; holdIds?: string[]; payout?: string };
+type Reply = { status: string; holdIds?: string[]; payout?: string; rake?: string };
 const db = new Database();
 let server: Server;
 let base: string;
@@ -33,7 +34,7 @@ beforeAll(async () => {
         res.setHeader('Content-Type', 'application/json');
         if (req.url === '/oauth/token') {
             tokenRequests++;
-            res.end(JSON.stringify({ access_token: 'test-service-token', expires_in: 90 }));
+            res.end(JSON.stringify({ access_token: 'test-service-token', expires_in: 90, token_type: 'Bearer', scope: 'spotkick:matches' }));
             return;
         }
         const route = /^\/api\/v1\/spotkick\/matches\/([^/]+)\/(reserve|settle|release)$/.exec(req.url || '');
@@ -49,13 +50,15 @@ beforeAll(async () => {
         calls.push({ id, action, key, request });
         if (fail?.action === action) {
             if (fail.retryAfter) res.setHeader('Retry-After', fail.retryAfter);
-            res.writeHead(fail.status).end(JSON.stringify({ code: fail.code }));
+            res.writeHead(fail.status).end(JSON.stringify({ code: fail.code, message: 'Test failure', correlationId: id }));
             return;
         }
+        const operation = action === 'reserve' ? 'reserveMatch' : action === 'settle' ? 'settleMatch' : 'releaseMatch';
+        validateWalletRequest(operation, request ? JSON.parse(request) : undefined, key);
         const previous = written.get(key);
         if (previous) {
             if (previous.request !== request) res.writeHead(409).end(JSON.stringify({ code: 'idempotency_conflict' }));
-            else res.end(JSON.stringify(previous.reply));
+            else res.writeHead(action === 'reserve' ? 201 : 200).end(JSON.stringify(previous.reply));
             return;
         }
         let reply: Reply;
@@ -75,13 +78,14 @@ beforeAll(async () => {
                 return;
             }
             holds.state = action === 'settle' ? 'captured' : 'released';
-            reply = action === 'settle' ? { status: 'settled', payout: '1940' } : { status: 'released' };
+            reply = action === 'settle' ? { status: 'settled', payout: '1940', rake: '60' } : { status: 'released' };
         }
+        validateWalletResponse(operation, action === 'reserve' ? 201 : 200, reply);
         written.set(key, { request, reply });
         if (drop === action) {
             drop = undefined;
             res.destroy();
-        } else res.end(JSON.stringify(reply));
+        } else res.writeHead(action === 'reserve' ? 201 : 200).end(JSON.stringify(reply));
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const address = server.address();
@@ -168,6 +172,7 @@ it('rolls back the outbox with the business transaction and preserves event ID o
     })).rejects.toThrow('forced rollback');
     expect(await facts(matchId)).toEqual([]);
     const event = await db.tx(tx => enqueuePlatformEvent(tx, topic, matchId, data));
+    expect(validateContractEvent(topic, (await facts(matchId))[0].payload)).toEqual(event);
     const otherId = randomUUID();
     await db.tx(tx => enqueuePlatformEvent(tx, topic, otherId, { ...data, matchId: otherId }));
     let attempted = false;

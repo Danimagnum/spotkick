@@ -2,7 +2,7 @@
 
 SpotKick uses the demo ledger by default and starts without Kafka or Core. Set `PLATFORM_MODE=true` on a separate deployment to enable Core and Kafka for live two-player matches. Balances and journal entries then come from Core in EUR minor units. Demo bots and solo stakes are disabled.
 
-`PLATFORM_MODE=false` explicitly selects demo. For existing Core-only deployments, leaving the flag unset with `CORE_URL` set retains Core-only compatibility. Platform events and dependency readiness checks require the explicit platform mode.
+`PLATFORM_MODE=false` or an absent flag selects standalone, even when `CORE_URL` is configured. Only `PLATFORM_MODE=true` enables Core and Kafka. Drain existing Core matches before changing modes.
 
 ## Configuration
 
@@ -16,11 +16,13 @@ SpotKick persists a match ID and its pending wallet action before sending a requ
 
 The request keys are `match:<id>:reserve`, `match:<id>:settle` and `match:<id>:release`. SpotKick retries the same key and body after a timeout, 5xx, 429 or `409 idempotency_in_progress`. It respects `Retry-After`. An eligibility or funding rejection records the reason without a local debit or a started event. If local confirmation of a successful reserve rolls back, the worker records a pending release once PostgreSQL can accept the compensation. A lost local commit response is reconciled against the persisted match phase before releasing.
 
+The wallet client performs no in-memory money retries: the persisted match command schedules backoff and respects Retry-After across restarts. A 401 refreshes the machine token once with the same request/key. Reserve expects HTTP 201 and two hold IDs; settlement expects payout and rake. Release sends no request body. The settlementId is the stable command key `match:<id>:settle` or `match:<id>:release`, not a field invented in Core’s response.
+
 A definitive wallet conflict leaves the command and decision available for reconciliation. Inspect the structured `core.match.reconciliation_required` log, the persisted match and the corresponding Core operation before resuming. If the holds expired while settling, SpotKick confirms their release and retains the sporting decision in the internal record. Keep Core available while active Core matches drain before changing modes.
 
 ## Platform events and operations
 
-The three vendored JSON Schemas come from `Danimagnum/platform-contracts@aae7661`. Match facts are stored in `platform_outbox` in the same transaction as the confirmed state. The relay sends with an aggregate key, the `event-id` header and broker acknowledgements before marking the row. Failed deliveries are scheduled for retry after 30 seconds. Earlier unpublished events block only later events with the same topic and aggregate key. Consumers deduplicate by event ID. Prepare the three topics and broker permissions before starting platform mode. SpotKick uses the broker listener advertised to the API.
+The API pins `@danigil/platform-contracts@0.2.0` from npm. Events use its Zod registry and `ValidatedProducer`; there are no vendored event schemas. Grouped money writes use its `WalletClient` and request/response types. JWT verification uses `createAuthVerifier` with the existing cached, trusted JWKS resolver; machine tokens use `createClientCredentialsProvider`. Match facts are stored in `platform_outbox` in the same transaction as the confirmed state. The relay sends with an aggregate key, the `event-id` header and broker acknowledgements before marking the row. Failed deliveries are scheduled for retry after 30 seconds. Earlier unpublished events block only later events with the same topic and aggregate key. Consumers deduplicate by event ID. Prepare the three topics and broker permissions before starting platform mode. SpotKick uses the broker listener advertised to the API.
 
 - `spotkick.match.started.v1` follows confirmation of both stakes.
 - `spotkick.match.settled.v1` follows a confirmed payment or refund. It includes the persisted `settlementId`. A tie in regulation continues into sudden death.
@@ -50,3 +52,9 @@ pnpm exec vitest run tests/integration/core-wallet.test.ts
 ```
 
 The test provisions disposable verified users and a scoped client. A loopback HTTP proxy drops the reserve and settlement responses after Core commits, so SpotKick must recover through the real client retry path. The test checks payout, rake, balanced ledger postings, outbox facts, cancellation and a rejection with no holds or started fact.
+
+## Contract verification (0.2.0)
+
+`pnpm test:contract` runs the official package test kit and adapter tests. Integration tests validate actual outgoing grouped requests and stored outbox payloads; fixtures include the contract HTTP statuses and machine-token fields. `pnpm test:mutations` deliberately breaks opt-in, event validation and money idempotency and requires assertion failures before restoring each source file. Run it with the same isolated PostgreSQL and Redis as integration tests. CI runs both commands.
+
+The existing `/api/v1/spotkick/users/:id/wallet` summary and identity/login routes are Core-specific read adapters, outside the package wallet OpenAPI. Their small response validators remain local; no money-write or JWT claim contract is duplicated.

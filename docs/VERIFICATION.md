@@ -50,3 +50,9 @@ Restart check: restarted only the acceptance API and Redis; the same authenticat
 ## Remote CI, 6 November
 
 Repository published at [Danimagnum/spotkick](https://github.com/Danimagnum/spotkick). [GitHub Actions run 42255301988](https://github.com/Danimagnum/spotkick/actions/runs/42255301988) passed for code commit a7dae35: frozen installation, unit tests, TypeScript, PostgreSQL/Redis integration tests, production builds, all three Playwright tests and both Docker targets. Two earlier runs were cancelled after the browser-download step stalled; CI now uses the Chrome already installed on the Ubuntu 24.04 runner.
+
+## Contract 0.2.0 alignment, 11 November 2026
+
+Executed on the PR branch: npm 0.2.0 installed exactly; API TypeScript passed; 17 existing unit tests passed; 14 integration tests passed against isolated Docker postgres:17-alpine and redis:7.4-alpine (loopback ports 25432/26379), plus two contract tests using the published testing kit. The grouped HTTP fixtures are test doubles, not Core. Three deliberate mutations were detected by assertions: implicit Core activation, skipped event validation and a changed money idempotency key. Source was restored after each mutation.
+
+Not yet verified for this revision: the exact published Core image (tag/digest not supplied), real-Core failure scenarios, Kafka delivery, 200 simultaneous matches, new CI run, GHCR publication or physical mobile acceptance. Previous results above describe earlier revisions and are not evidence for these outstanding checks. No platform-infra or NAS deployment was changed.

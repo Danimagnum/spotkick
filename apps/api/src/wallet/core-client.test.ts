@@ -69,14 +69,14 @@ it.each([false, true])('refreshes a rejected service token once (second rejectio
     server = createServer(async (req, res) => {
         res.setHeader('Content-Type', 'application/json');
         if (req.url === '/oauth/token') {
-            res.end(JSON.stringify({ access_token: 'token-' + ++tokenRequests, expires_in: 90 }));
+            res.end(JSON.stringify({ access_token: 'token-' + ++tokenRequests, expires_in: 90, token_type: 'Bearer', scope: 'spotkick:matches' }));
             return;
         }
         const chunks: Buffer[] = [];
         for await (const chunk of req) chunks.push(chunk);
         requests.push({ token: req.headers.authorization, key: req.headers['idempotency-key'], body: Buffer.concat(chunks).toString() });
-        if (requests.length === 1 || rejectAgain) res.writeHead(401).end(JSON.stringify({ code: 'invalid_token' }));
-        else res.end(JSON.stringify({ status: 'settled', payout: '1940' }));
+        if (requests.length === 1 || rejectAgain) res.writeHead(401).end(JSON.stringify({ code: 'unauthorized', message: 'Invalid token', correlationId: 'test' }));
+        else res.end(JSON.stringify({ status: 'settled', payout: '1940', rake: '60' }));
     });
     await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve));
     const address = server.address();
@@ -84,7 +84,7 @@ it.each([false, true])('refreshes a rejected service token once (second rejectio
     vi.stubEnv('CORE_URL', `http://127.0.0.1:${address.port}`);
     vi.stubEnv('CORE_CLIENT_SECRET', 'test-secret');
     const matchId = randomUUID();
-    const body = { winnerId: randomUUID() };
+    const body = { winnerId: randomUUID(), rakeBps: 300 };
     const settlement = new CoreClient().match(matchId, 'settle', body);
     if (rejectAgain) await expect(settlement).rejects.toMatchObject({ status: 401 });
     else await expect(settlement).resolves.toMatchObject({ status: 'settled' });

@@ -33,8 +33,10 @@ jobs:
       - run: npm install --global pnpm@11.25.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      - run: pnpm test:contract
       - run: pnpm typecheck
       - run: pnpm test:integration
+      - run: pnpm test:mutations
       - run: pnpm build
       - name: Check preinstalled Chrome
         run: google-chrome --version

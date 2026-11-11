@@ -1,7 +1,5 @@
 export const platformMode = () => process.env.PLATFORM_MODE === 'true';
-export const coreEnabled = () => process.env.PLATFORM_MODE === undefined
-    ? Boolean(process.env.CORE_URL)
-    : platformMode();
+export const coreEnabled = platformMode;
 export const serviceName = () => process.env.SERVICE_NAME || 'spotkick';
 export const redisKey = (key: string) => `${serviceName()}:${key}`;
 export const kafkaBrokers = () => (process.env.KAFKA_BROKERS || '').split(',').map(value => value.trim()).filter(Boolean);

@@ -1,4 +1,5 @@
 import { Injectable, type OnApplicationShutdown } from '@nestjs/common';
+import { ValidatedProducer } from '@danigil/platform-contracts';
 import { Kafka, type Admin, type Producer } from 'kafkajs';
 import { kafkaBrokers, platformMode, serviceName } from '../platform-config';
 import { assertPlatformEvent, type PlatformTopic } from './events';
@@ -23,10 +24,11 @@ export class KafkaTransport implements OnApplicationShutdown {
             throw error;
         });
         await this.producerReady;
-        await this.producer.send({
-            topic, acks: -1, timeout: 2000,
-            messages: [{ key, value: JSON.stringify(payload), headers: { 'event-id': payload.id } }],
-        });
+        const producer = this.producer;
+        await new ValidatedProducer({ send: record => producer.send({ ...record, timeout: 2000,
+            messages: record.messages.map(message => ({ ...message,
+                headers: { ...message.headers, 'event-id': payload.id } })),
+        }) }, serviceName()).sendEvent(topic, payload, key);
     }
 
     ready() {
