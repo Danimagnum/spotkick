@@ -6,6 +6,10 @@ Este documento es una propuesta para Daniel. No se ha editado `platform-infra` n
 
 Core todavía no está etiquetado; están pendientes payout desde house, captura parcial y API de permisos de `/api/v1`. Mantener la integración y la PR abiertas hasta recibir **Core v0.2.0** y repetir las pruebas reales. No sustituir la reserva/liquidación agrupada de SpotKick por llamadas independientes a holds y transferencias. El paquete npm 0.2.0 no acredita que el servidor implemente sus operaciones.
 
+## Imagen ya publicada y verificada
+
+El [workflow 43071313828](https://github.com/Danimagnum/spotkick/actions/runs/43071313828) publicó y comprobó `ghcr.io/danimagnum/spotkick-api:sha-67f725871ad3ad232d9e5666d2b564b56a5d0fc3`, digest `sha256:49ecf040d61499725bdea1f196ce76e4faf70bca5004937f6622dc18b55638fc`. Es evidencia de publicación y arranque standalone, no una autorización para desplegar ni aceptación de Core. Elegir el commit más reciente que tenga también verify, secrets y publish-api en verde; hay una corrección posterior de la cola de salud. No usar `latest`.
+
 ## Perfil full del PC
 
 La copia de `platform-infra/docker-compose.yml` revisada ya contiene un servicio `spotkick`, una base/rol `spotkick` y el target Prometheus `spotkick:3000`. Hay que actualizar esas entradas, no duplicarlas:

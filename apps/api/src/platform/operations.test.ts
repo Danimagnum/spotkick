@@ -30,3 +30,40 @@ it('coalesces concurrent readiness requests and reuses fresh probe results', asy
     expect(query).toHaveBeenCalledTimes(1);
     expect(ping).toHaveBeenCalledTimes(1);
 });
+
+it('drains a full health queue after persistence recovers and preserves observation-time metrics', async () => {
+    vi.stubEnv('PLATFORM_MODE', 'true');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    let failing = true, broker = true;
+    const events: any[] = [];
+    const db = { ready: true, source: { query: async () => [] }, tx: async (work: any) => {
+        if (failing) throw new Error('outbox unavailable');
+        return work({ query: async (_sql: string, args: any[]) => { events.push(JSON.parse(args[3])); } });
+    } } as unknown as Database;
+    const operations = new Operations(db, { client: { ping: async () => 'PONG' } } as unknown as RedisService,
+        { ready: async () => broker } as KafkaTransport, { checkReadiness: async () => ({}) } as CoreClient);
+    const report = () => (operations as unknown as { report(): Promise<void> }).report();
+    try {
+        operations.observe(200, 20);
+        await expect(report()).rejects.toThrow('outbox unavailable');
+        operations.observe(500, 900);
+        for (let i = 0; i < 65; i++) {
+            vi.setSystemTime(Date.now() + 2000);
+            broker = !broker;
+            await expect(report()).rejects.toThrow('outbox unavailable');
+        }
+        failing = false;
+        broker = true;
+        vi.setSystemTime(Date.now() + 2000);
+        await report();
+        expect(events).toHaveLength(64);
+        expect(events[0].data).toMatchObject({ latencyP95: 20, errorRate: 0 });
+        vi.setSystemTime(Date.now() + 2000);
+        await report();
+        expect(events.at(-1).data.status).toBe('healthy');
+    } finally {
+        await operations.beforeApplicationShutdown();
+        vi.useRealTimers();
+        vi.unstubAllEnvs();
+    }
+});

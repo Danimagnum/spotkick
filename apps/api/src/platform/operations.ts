@@ -40,7 +40,7 @@ export class Operations implements OnApplicationBootstrap, BeforeApplicationShut
     private pending?: Promise<void>;
     private stopping = false;
     private lastObserved?: Health;
-    private readonly healthQueue: { status: Health; at: Date }[] = [];
+    private readonly healthQueue: { status: Health; at: Date; window: Pick<EventData<'system.health.reported.v1'>, 'latencyP95' | 'errorRate'> }[] = [];
     private lastReportAt = 0;
     private gameRefresh?: Promise<void>;
     private gameQuery?: Promise<number>;
@@ -175,19 +175,19 @@ export class Operations implements OnApplicationBootstrap, BeforeApplicationShut
         if (status !== this.lastObserved) {
             if (this.healthQueue.length >= 64) {
                 console.warn(JSON.stringify({ event: 'platform.health.queue_full' }));
-                return;
+            } else {
+                this.healthQueue.push({ status, at: now, window: this.window(now.getTime()) });
+                this.lastObserved = status;
             }
-            this.healthQueue.push({ status, at: now });
-            this.lastObserved = status;
         } else if (!this.healthQueue.length && now.getTime() - this.lastReportAt >= 30_000) {
-            this.healthQueue.push({ status, at: now });
+            this.healthQueue.push({ status, at: now, window: this.window(now.getTime()) });
         }
         const batch = [...this.healthQueue];
         if (!batch.length) return;
         const service = serviceName();
         await this.db.tx(async tx => {
             for (const sample of batch) await enqueuePlatformEvent(tx, 'system.health.reported.v1', service,
-                { service, status: sample.status, ...this.window(sample.at.getTime()) }, sample.at, randomUUID());
+                { service, status: sample.status, ...sample.window }, sample.at, randomUUID());
         });
         this.healthQueue.splice(0, batch.length);
         this.lastReportAt = now.getTime();
