@@ -252,7 +252,7 @@ The Prometheus endpoint includes active matches from PostgreSQL (use max across 
 
 ### Images and secret scanning
 
-CI scans the entire Git history and current files with Gitleaks v8.30.1 pinned by digest. Its positive control must detect a generated disposable private key; logs are redacted. Run `pnpm test:secrets` from the repository root with Docker available. No allowlist suppresses findings.
+CI scans the entire Git history and current files with Gitleaks v8.30.1 pinned by digest. Its positive controls must detect a generated disposable private key and API token; logs are redacted. Run `pnpm test:secrets` from the repository root with Docker available. The sole allowlist entry matches one exact public GHCR commit tag in the two image-evidence documents; it does not exclude paths, commits or rules wholesale.
 
 After verify and secrets pass, a push to this PR branch or main publishes `ghcr.io/danimagnum/spotkick-api:sha-<full commit SHA>` for linux/amd64. Publication has no deployment step. It disables attestations/SBOM attachments, forces Docker gzip layers and verifies the remote manifest and a read-only standalone container. The frontend image still requires a build for its actual browser API URL; the public demo is not rebuilt by this job. See [pending platform-infra additions](docs/platform-infra-additions.md) for PC/NAS integration, Prometheus and transfer checks. Core integration and merge remain gated on Core v0.2.0.
 
