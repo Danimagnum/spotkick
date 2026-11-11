@@ -5,7 +5,7 @@
   "packageManager": "pnpm@11.25.0",
   "scripts": {
     "build": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/api build && pnpm --filter @spotkick/web build",
-    "test": "vitest run --exclude tests/integration/**",
+    "test": "vitest run --exclude \"tests/integration/**\"",
     "test:integration": "vitest run tests/integration",
     "test:e2e": "playwright test",
     "typecheck": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/api typecheck && pnpm --filter @spotkick/web typecheck",

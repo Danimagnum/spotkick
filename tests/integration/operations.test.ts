@@ -17,7 +17,8 @@ const { io } = webRequire('socket.io-client');
 let app: any, base: string, db: Database, redis: RedisService;
 beforeAll(async () => {
     vi.stubEnv('PLATFORM_MODE', 'false');
-    execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'apps/api/tsconfig.json'], { stdio: 'pipe' });
+    execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'packages/shared/tsconfig.json'], { stdio: 'inherit' });
+    execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'apps/api/tsconfig.json'], { stdio: 'inherit' });
     app = await NestFactory.create(apiRequire('./dist/app.js').AppModule, { logger: false });
     await app.listen(0, '127.0.0.1');
     base = await app.getUrl();
