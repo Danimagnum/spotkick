@@ -6,3 +6,5 @@ allowBuilds:
   esbuild: true
   '@nestjs/core': true
   sharp: true
+minimumReleaseAgeExclude:
+  - '@danigil/platform-contracts@0.3.0'

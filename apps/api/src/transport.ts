@@ -12,6 +12,7 @@ import { MatchEngine } from './matches/engine';
 import { SoloService } from './solo/solo';
 import { RedisService } from './redis';
 import { Runtime } from './runtime';
+import { platformMode, redisKey } from './platform-config';
 const idSchema = z.string().uuid();
 export function safeError(e: unknown) { if (e instanceof ZodError)
     return 'Invalid request'; if (e instanceof HttpException)
@@ -26,22 +27,31 @@ export class ErrorFilter implements ExceptionFilter {
 export class ApiController {
     constructor(private identity: Identity, private db: Database, private ledger: Ledger, private engine: MatchEngine, private solo: SoloService, private runtime: Runtime, private redis: RedisService) { }
     private user(auth?: string) { return this.identity.auth(auth?.replace(/^Bearer /, '')); }
+    private demoOnly() {
+        if (this.identity.core.enabled) throw new HttpException('Solo is available in demo mode', 403);
+    }
+    @Get('mode')
+    mode() { return { mode: this.identity.core.enabled ? 'core' : 'demo' }; }
     @Get('health')
     async health() { await this.db.source.query('SELECT 1'); await this.redis.client.ping(); return { ok: true, service: 'spotkick' }; }
     @Post('session')
     async session(
     @Req()
-    req: any) { const key = `spotkick:guest:${req.ip}`; const n = await this.redis.client.incr(key); if (n === 1)
+    req: any, @Body() body: unknown) { const key = redisKey(`guest:${req.ip}`); const n = await this.redis.client.incr(key); if (n === 1)
         await this.redis.client.expire(key, 60); if (n > Number(process.env.GUEST_RATE_LIMIT || 30))
-        throw new HttpException('Too many guest sessions; try again shortly', 429); return this.identity.create(); }
+        throw new HttpException('Too many sessions; try again shortly', 429);
+        if (this.identity.core.enabled)
+            return this.identity.core.login(z.object({ email: z.string().email().max(254), password: z.string().min(1).max(128) }).strict().parse(body));
+        return this.identity.create();
+    }
     @Get('me')
     async me(
     @Headers('authorization')
-    auth?: string) { const u = await this.user(auth); const balance = await this.ledger.balance(this.db.source.manager, `user:${u.id}`); return { ...u, balance: Number(balance) }; }
+    auth?: string) { const u = await this.user(auth); const balance = this.identity.core.enabled ? (await this.identity.core.wallet(u.id)).available : Number(await this.ledger.balance(this.db.source.manager, `user:${u.id}`)); return { ...u, balance }; }
     @Get('wallet')
     async wallet(
     @Headers('authorization')
-    auth?: string) { const u = await this.user(auth); return this.db.source.query('SELECT t.operation,e.amount::text,t.created_at FROM ledger_entries e JOIN ledger_transactions t ON t.id=e.transaction_id WHERE e.account_id=$1 ORDER BY e.id DESC LIMIT 20', [`user:${u.id}`]); }
+    auth?: string) { const u = await this.user(auth); if (this.identity.core.enabled) return (await this.identity.core.wallet(u.id)).movements; return this.db.source.query('SELECT t.operation,e.amount::text,t.created_at FROM ledger_entries e JOIN ledger_transactions t ON t.id=e.transaction_id WHERE e.account_id=$1 ORDER BY e.id DESC LIMIT 20', [`user:${u.id}`]); }
     @Get('lobby')
     lobby() { return this.runtime.lobby(); }
     @Post('queue')
@@ -75,66 +85,74 @@ export class ApiController {
     @Post('solo/seed')
     async seed(
     @Headers('authorization')
-    auth: string) { return this.solo.seed((await this.user(auth)).id); }
+    auth: string) { this.demoOnly(); return this.solo.seed((await this.user(auth)).id); }
     @Post('solo/start')
     async start(
     @Headers('authorization')
     auth: string, 
     @Body()
-    body: unknown) { return this.solo.start((await this.user(auth)).id, soloStartSchema.parse(body)); }
+    body: unknown) { this.demoOnly(); return this.solo.start((await this.user(auth)).id, soloStartSchema.parse(body)); }
     @Post('solo/shoot')
     async shoot(
     @Headers('authorization')
     auth: string, 
     @Body()
-    body: unknown) { return this.solo.action((await this.user(auth)).id, soloActionSchema.parse(body)); }
+    body: unknown) { this.demoOnly(); return this.solo.action((await this.user(auth)).id, soloActionSchema.parse(body)); }
     @Post('solo/cashout')
     async cashout(
     @Headers('authorization')
     auth: string, 
     @Body()
-    body: unknown) { return this.solo.action((await this.user(auth)).id, soloActionSchema.parse(body), true); }
+    body: unknown) { this.demoOnly(); return this.solo.action((await this.user(auth)).id, soloActionSchema.parse(body), true); }
     @Get('solo/:id')
     async soloGet(
     @Headers('authorization')
     auth: string, 
     @Param('id')
-    id: string) { return this.solo.get(idSchema.parse(id), (await this.user(auth)).id); }
+    id: string) { this.demoOnly(); return this.solo.get(idSchema.parse(id), (await this.user(auth)).id); }
 }
 @WebSocketGateway({ cors: { origin: process.env.WEB_ORIGIN || 'http://localhost:3000' }, transports: ['websocket'], maxHttpBufferSize: 8192 })
 export class GameGateway implements OnGatewayInit, OnGatewayConnection {
     constructor(private identity: Identity, private engine: MatchEngine, private redis: RedisService, private runtime: Runtime) { }
-    afterInit(server: Server) { const pub = this.redis.client.duplicate(), sub = this.redis.client.duplicate(); server.adapter(createAdapter(pub, sub)); server.on('close', () => { pub.disconnect(); sub.disconnect(); }); this.runtime.start(server); }
+    afterInit(server: Server) {
+        server.adapter(createAdapter(this.redis.duplicate(), this.redis.duplicate(),
+            platformMode() ? { key: redisKey('socket.io') } : undefined));
+        this.runtime.start(server);
+    }
     async handleConnection(socket: Socket) {
         try {
             const user = await this.identity.auth(socket.handshake.auth.token);
             await socket.join(`user:${user.id}`);
-            const heartbeat = () => this.redis.client.zadd('spotkick:presence', Date.now(), user.id);
+            const heartbeat = () => this.redis.client.zadd(redisKey('presence'), Date.now(), user.id);
             await heartbeat();
             const handle = (name: string, fn: (v: any) => Promise<unknown>) => socket.on(name, async (data, ack) => { if (typeof ack !== 'function')
                 return; try {
-                const key = `spotkick:rate:${user.id}:${Math.floor(Date.now() / 1000)}`;
+                const key = redisKey(`rate:${user.id}:${Math.floor(Date.now() / 1000)}`);
                 const n = await this.redis.client.incr(key);
                 if (n === 1)
                     await this.redis.client.expire(key, 2);
                 if (n > 30)
                     throw new Error('Slow down and retry');
+                if (this.identity.core.enabled) await this.identity.core.verifyUserToken(socket.handshake.auth.token);
                 ack({ ok: true, data: await fn(data) });
             }
             catch (e) {
-                ack({ ok: false, error: safeError(e) });
+                ack({ ok: false, error: safeError(e), status: e instanceof HttpException ? e.getStatus() : undefined });
             } });
             handle('heartbeat', async () => { await heartbeat(); return { ok: true }; });
             handle('match:join', async (v) => { const id = idSchema.parse(v?.id); await this.engine.get(id, user.id); for (const room of socket.rooms)
                 if (room.startsWith('match:') && room !== `match:${id}`)
                     await socket.leave(room); await socket.join(`match:${id}`); return this.engine.get(id, user.id); });
             handle('queue:join', async (v) => this.engine.queue(user.id, queueSchema.parse(v).stake));
+            handle('match:practice', async (v) => this.engine.practice(user.id, queueSchema.parse(v).stake));
             handle('queue:cancel', async () => this.engine.cancel(user.id));
             handle('choice:commit', async (v) => { const p = commitSchema.parse(v); return this.engine.command(p.matchId, user.id, p.exchange, 'commit', p.hash); });
             handle('choice:reveal', async (v) => { const p = revealSchema.parse(v); return this.engine.command(p.matchId, user.id, p.exchange, 'reveal', { choice: p.choice, salt: p.salt }); });
             socket.emit('ready', { id: user.id, activeGame: user.active_game, queuedStake: user.queue_stake });
         }
-        catch {
+        catch (error) {
+            if (this.identity.core.enabled && error instanceof HttpException && error.getStatus() === 401)
+                socket.emit('session:expired');
             socket.disconnect(true);
         }
     }

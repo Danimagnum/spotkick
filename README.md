@@ -12,7 +12,7 @@ Start with the [five-minute demo](docs/DEMO.md), the [engineering case study](do
 
 For a detailed Windows checklist with commands, manual test cases and publication gates, see the [Spanish validation and publication guide](docs/GUIA_PUBLICACION.md). Its optional `compose.acceptance.yaml` uses separate local ports and supports a second API for load tests.
 
-The project is intended as an inspectable portfolio demo. Its strongest evidence is the combination of playable flows, real database contention tests and completed matches across two API instances. A public demo URL, remote CI run and container validation are still pending; those are not implied by the screenshots or local test results.
+The project is intended as an inspectable portfolio demo. Its strongest evidence is the combination of playable flows, real database contention tests and completed matches across two API instances. Remote CI, container publication and local Core fault tests have been executed; see [verification evidence](docs/VERIFICATION.md). The owner reports a standalone NAS/Funnel demo, but its current URL and physical mobile acceptance have not been independently verified in this integration run.
 
 ## Run it
 
@@ -24,7 +24,7 @@ docker compose up --build
 
 Open **http://localhost:3000**. API health: **http://localhost:3001/health**. The migration job finishes before the API becomes available. PostgreSQL and Redis volumes survive restarts. The API also checks migrations under a PostgreSQL advisory lock on startup.
 
-Each browser profile receives a guest session and **1,000 S** in play credits. A separate profile/incognito window creates a second player. Select a stake and find a match; a bot joins after five seconds if no compatible human is waiting. Bot identities are explicitly marked. Refresh during a match to reconnect.
+Each browser profile receives a guest session and **1,000 S** in play credits. Select a stake and choose **Find match** to enter the queue, where a bot joins after five seconds if no compatible human is waiting. **Practice vs bot** starts the same head-to-head rules immediately with a bot and play credits. A separate profile or incognito window creates a second player. Refresh during a match to reconnect.
 
 The bearer token is stored in localStorage. Clearing it creates a new guest wallet rather than recovering the old one. This is a portfolio guest-identity system, not account recovery.
 
@@ -74,7 +74,7 @@ The implementation uses BigInt rational arithmetic, not floating-point money. Ca
 
 The house reserves the entire next-shot payout in a solo escrow account **before accepting that shot**. Continuations top up the reserve from the house bankroll. If the bankroll or safe-integer payout capacity cannot support another shot, the request is rejected before consuming a nonce and the player can cash out. The arithmetic helper allows up to 64 goals; practical capacity is reached first. There is no unbounded, unfunded house liability.
 
-## Architecture
+## Standalone architecture
 
 ```mermaid
 flowchart LR
@@ -92,7 +92,7 @@ flowchart LR
     N1 --> S[Sentry when configured]
 ```
 
-**PostgreSQL is authoritative.** Match snapshots, choice commitments, reveals, deadlines, guest activity and ledger entries are durable. Redis is disposable: the queue can be reconstructed from durable intents; reconnect reads PostgreSQL; cached match views never contain unrevealed choices, salts or seeds.
+**PostgreSQL is authoritative for SpotKick game state.** In standalone it also owns the ledger; in platform mode Core owns identity and money while SpotKick persists decisions and pending commands. Match snapshots, choice commitments, reveals, deadlines, guest activity and ledger entries are durable. Redis is disposable: the queue can be reconstructed from durable intents; reconnect reads PostgreSQL; cached match views never contain unrevealed choices, salts or seeds.
 
 API processes keep socket connections and a periodic worker, but correctness does not depend on process-local game state or timers. Multiple workers coordinate with row locks and `SKIP LOCKED`. Redis-adapter broadcasts reach sockets connected to other API instances. The transport is WebSocket-only, so this demo does not require polling-session affinity.
 
@@ -223,6 +223,25 @@ k6 run -e VUS=12 -e DURATION=1s -e API_URLS=http://localhost:3001,http://localho
 
 The load script implements Engine.IO v4 / Socket.IO envelopes with built-in k6 WebSockets. It creates guest wallets, queues real players, commits/reveals every exchange and checks final wallet arithmetic. Odd queues exercise delayed bots. Thresholds: match success >95%, HTTP failures <1%, match p95 <150 seconds. These are demo test gates, not published capacity claims. Sudden death is unbounded by the rules; a sufficiently long tie can exceed the load-test timeout.
 
+## Platform integration
+
+Standalone is the default, including when CORE_URL is present. Set PLATFORM_MODE=true explicitly for Core identity, grouped wallet commands and Kafka. The API pins **@danigil/platform-contracts 0.3.0**; see [Platform Core mode](docs/PLATFORM_CORE.md) and the [step-by-step integration guide](docs/INTEGRATION-GUIDE.md). `pnpm test:contract` checks the published contract kit and adapters; `pnpm test:mutations` checks that deliberate regressions are detected against isolated test dependencies. Core v0.2.0 has passed the local EUR integration and fault/idempotency tests using its pinned release image. Player-session activation creates wallet grants; settlement uses the grouped /api/v1 settle operation. Reproduce with `pnpm test:core:mutations`; see [saved evidence](docs/core-v020-results.json). Core is not deployed/tested on NAS; the 200-match standalone load run is documented below and physical mobile acceptance remains pending.
+
+### 200 simultaneous matches, 12 November 2026
+
+Two native API instances reached **200 active matches / 400 Socket.IO connections**, completed 200/200 matches and passed 400/400 wallet checks. No command/HTTP errors, timeout exchanges, negative spendable accounts or ledger imbalance were observed.
+
+| Measurement | Before | After |
+|---|---:|---:|
+| Peak active matches | 48 | **200** |
+| Complete-match p95, including queue/barriers | 126.48 s | **52.78 s** |
+| HTTP p95 | 247.12 ms | **167.63 ms** |
+| Successful player iterations | 400/400 | 400/400 |
+
+The bottleneck was one pairing per runtime cycle and per-match polling before deadlines. Pairing now runs in bounded batches (up to 32 / 250 ms budget), and an indexed, bounded query selects only due matches for the current mode. Financial transactions and locks are unchanged. Saved [before](docs/load-200-before.json) and [after](docs/load-200-after.json) evidence includes 250 ms concurrency samples and SQL audits.
+
+Exact workload: standalone, 200 pairs, one iteration per player, guests created before connection, queue barrier +5 s and first-choice barrier +25 s. CHOICE_MS=60000, REVEAL_MS=3000, RESULT_MS=1600, BOT_AFTER_MS=60000, GUEST_RATE_LIMIT=2000. The barrier and longer choice window are intentional; this is not a benchmark of the default 10-second window, Core throughput or NAS capacity. Workstation: Windows 10.0.26200, i5-11400F / 12 logical CPUs, 16 GiB RAM; Node 24.17.0, k6 2.3.0; Docker 29.9.2 / WSL, PostgreSQL 17.11 and Redis 7.4. APIs listen on loopback test endpoints 34311/34312; each run creates its own database and preserves it. With the local test stack dependencies running, execute `K6_BIN=<path> pnpm test:load:200` (set the variable using your shell). The runner stops only its own API processes afterward.
+
 ## Configuration and observability
 
 | Variable | Default | Meaning |
@@ -242,19 +261,35 @@ The load script implements Engine.IO v4 / Socket.IO envelopes with built-in k6 W
 
 Sentry initializes before NestJS imports and through Next.js server/client instrumentation. DSNs are optional; reporting is disabled when absent. Request bodies, authorization and cookies are stripped from API error events. No seed values or bearer tokens are intentionally logged. The runtime emits structured JSON failures. Browser and database tracing need operational review before handling sensitive production identities. No real Sentry delivery has been verified without a DSN.
 
+### Service metrics
+
+The Prometheus endpoint includes active matches from PostgreSQL (use max across replicas), local Socket.IO connections (sum across replicas), resolution processing latency in seconds, and settlement failure attempts by mode. Counters and histograms reset on restart. Readiness returns 503 when dependencies fail while liveness stays 200. Platform health events report startup, observed state changes and 30-second heartbeats through the outbox. See [operational semantics](docs/PLATFORM_CORE.md#game-metrics).
+
+### Images and secret scanning
+
+CI scans the entire Git history and current files with Gitleaks v8.30.1 pinned by digest. Its positive controls must detect a generated disposable private key and API token; logs are redacted. Run `pnpm test:secrets` from the repository root with Docker available. The sole allowlist entry matches one exact public GHCR commit tag in the two image-evidence documents; it does not exclude paths, commits or rules wholesale.
+
+After verify and secrets pass, a push to this PR branch or main publishes `ghcr.io/danimagnum/spotkick-api:sha-<full commit SHA>` for linux/amd64. Publication has no deployment step. It disables attestations/SBOM attachments, forces Docker gzip layers and verifies the remote manifest and a read-only standalone container. The frontend image still requires a build for its actual browser API URL; the public demo is not rebuilt by this job. See [pending platform-infra additions](docs/platform-infra-additions.md) for PC/NAS integration, Prometheus and transfer checks. NAS integration remains separate from the verified local Core v0.2.0 run.
+
 ## How it scales
 
 - **API instances:** durable state and database deadlines allow horizontal API replication. Use a reverse proxy, health checks and WebSocket-aware connection draining. The Redis adapter fans room events across instances; recovery always retrieves a durable snapshot.
-- **Room sharding:** assign match IDs consistently to worker shards. The current MVP scans active matches; production should index scheduled deadlines and claim bounded due batches instead. Keep authoritative transitions under database locks even after routing changes.
+- **Room sharding:** assign match IDs consistently to worker shards. The runtime now uses a partial deadline index and bounded due batches; further scaling can shard deadline ownership. Keep authoritative transitions under database locks even after routing changes.
 - **Matchmaking:** Redis sorted sets index queue order. PostgreSQL intents repair cache loss and prevent a user entering multiple funded games. The MVP serializes matching with an advisory lock; shard queues/claims by stake and region for higher throughput and fairer independent buckets.
 - **Ledger hot spots:** shared house-rake and house-bankroll rows deliberately serialize conflicting transfers. Use sharded house accounts, batched rake collection and ledger checkpoints/materialized balance projections with transactional invariant checks as volume grows. Index and archive old journal partitions without losing auditability.
 - **Outbox:** row claims prevent competing publishers processing the same pending batch simultaneously. A crash after emit but before marking published can duplicate events, so versions and idempotent commands remain essential. Partition outbox workers, prune delivered events under retention policy and monitor backlog age.
 - **Presence/lobby:** Redis TTL-style presence tolerates reloads and multiple tabs. The current lobby aggregates PostgreSQL once per second per API instance; move those aggregates into a single materialized/pub-sub feed at scale. Queue and presence keys also need bounded retention cleanup.
 - **Availability:** Redis failure pauses matchmaking/broadcasts while durable money remains in PostgreSQL. A browser reconnects to reconstruct state. Database failure rejects mutations; it never invents a local balance. Use managed PostgreSQL failover, Redis recovery and consistent backups before exposing a service.
 
+## Verified and unverified
+
+Verified locally: pinned Core v0.2.0 / contracts 0.3.0 (EUR), player-session grants, fault/replay cases with zero duplicate journal writes, Kafka inbox/DLQ and SQL rollback, 200 simultaneous standalone matches across two APIs, 21 unit/contract tests, 20 standard real-dependency integration tests plus the separate real-Core scenario, and 14 deliberate mutations (12 standard, two against Core). CI checks, Playwright and image publication are linked on [PR #1](https://github.com/Danimagnum/spotkick/pull/1). See [the guide](docs/INTEGRATION-GUIDE.md) and [executed evidence](docs/VERIFICATION.md).
+
+Unverified here: physical mobile/two-session access to Funnel; NAS Core deployment, image import/resources/rollback; Core/default-10-second-window capacity; KYC blob/review workflow and real funding; portal refresh-token renewal. The 200-match test used standalone and a 60-second choice window. Infrastructure proposals are documented only and the public demo retains its standalone deployment.
+
 ## Next steps and explicit limits
 
-This is an engineering MVP. Next work: registered identities and recovery, transport-wide rate limits, signed commitment receipts, independently published fairness transcripts, stronger non-reveal economics, seed-vault access separation, tested multi-instance failure injection, a ledger read projection, dead-letter/outbox alerting, player display names, keyboard shortcuts and a wider accessibility audit.
+This is an engineering MVP. Next work: standalone guest recovery and platform portal-token renewal, transport-wide rate limits, signed commitment receipts, independently published fairness transcripts, stronger non-reveal economics, seed-vault access separation, tested multi-instance failure injection, a ledger read projection, dead-letter/outbox alerting, player display names, keyboard shortcuts and a wider accessibility audit.
 
 The API database role currently owns its schema so automatic migrations can run. A hardened deployment should separate migration ownership from a restricted runtime role. Database administrators can always disable triggers; database controls are not protection against the operator itself. Browser tokens use localStorage for demo simplicity; authenticated production would warrant a reviewed session and XSS model.
 
@@ -277,4 +312,4 @@ Implementation references: [NestJS Redis adapter](https://docs.nestjs.com/websoc
 
 ## Portfolio hosting
 
-Public source: [Danimagnum/spotkick](https://github.com/Danimagnum/spotkick). For the existing DS918+, see [Synology deployment](docs/SYNOLOGY.md). A generic production overlay is also documented in [deployment preparation](docs/DEPLOYMENT.md). Public DNS, NAS access and external acceptance are pending; no live public demo is claimed yet.
+Public source: [Danimagnum/spotkick](https://github.com/Danimagnum/spotkick). For the existing DS918+, see [Synology deployment](docs/SYNOLOGY.md). A generic production overlay is also documented in [deployment preparation](docs/DEPLOYMENT.md). The owner reports the existing standalone demo on Tailscale Funnel. This integration did not redeploy it or test Core on the NAS. Physical mobile/two-session acceptance, NAS Core deployment/import/resources and staging rollback remain separate pending checks.

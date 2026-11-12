@@ -46,6 +46,8 @@ export interface MatchView {
     results: ExchangeResult[];
     winner?: string;
     payout?: number;
+    settlementId?: string;
+    walletIssue?: 'responsible_gaming' | 'insufficient_funds' | 'wallet_unavailable';
     timeoutSeedHash: string;
     timeoutSeed?: string;
 }
@@ -130,4 +132,8 @@ export async function fairZone(serverSeed: string, clientSeed: string, nonce: nu
         if (digest !== 'f'.repeat(64))
             return zones[Number(BigInt(`0x${digest}`) % 3n)];
     }
+}
+
+export function botZone(serverSeed: string, botId: string, exchange: number): Promise<Zone> {
+    return fairZone(serverSeed, `bot:${botId}`, exchange);
 }

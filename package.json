@@ -5,19 +5,26 @@
   "packageManager": "pnpm@11.25.0",
   "scripts": {
     "build": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/api build && pnpm --filter @spotkick/web build",
-    "test": "vitest run --exclude tests/integration/**",
+    "test": "vitest run --exclude \"tests/integration/**\"",
     "test:integration": "vitest run tests/integration",
     "test:e2e": "playwright test",
     "typecheck": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/api typecheck && pnpm --filter @spotkick/web typecheck",
     "dev:api": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/api dev",
     "dev:web": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/web dev",
-    "db:migrate": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/api migrate"
+    "db:migrate": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/api migrate",
+    "test:contract": "vitest run tests/contract apps/api/src/platform/events.test.ts apps/api/src/wallet/core-client.test.ts",
+    "test:mutations": "node scripts/check-platform-mutations.mjs",
+    "test:secrets": "node scripts/scan-secrets.mjs",
+    "test:core": "node scripts/test-core-local.mjs",
+    "test:core:mutations": "node scripts/test-core-local.mjs --mutations",
+    "test:load:200": "node scripts/load-two-instances.mjs"
   },
   "devDependencies": {
+    "@danigil/platform-contracts": "0.3.0",
     "@playwright/test": "^1.58.0",
     "@types/node": "^22.0.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4",
-    "tsx": "^4.21.0"
+    "vitest": "^3.2.4"
   }
 }

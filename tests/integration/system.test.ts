@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, describe, it, expect } from 'vitest';
+import { beforeAll, afterAll, describe, it, expect, vi } from 'vitest';
 import { randomUUID, createHmac } from 'node:crypto';
 import { commitment, sha256, zones, Zone } from '@spotkick/shared';
 import { Database } from '../../apps/api/src/database/db';
@@ -9,7 +9,7 @@ import { MatchEngine, MatchState } from '../../apps/api/src/matches/engine';
 import { SoloService } from '../../apps/api/src/solo/solo';
 const db = new Database(), ledger = new Ledger(), identity = new Identity(db, ledger), redis = new RedisService(), engine = new MatchEngine(db, ledger, identity, redis), solo = new SoloService(db, ledger);
 beforeAll(async () => { await db.onModuleInit(); await redis.client.ping(); process.env.BOT_AFTER_MS = '0'; process.env.RESULT_MS = '0'; });
-afterAll(async () => { redis.client.disconnect(); await db.onModuleDestroy(); });
+afterAll(async () => { redis.client.disconnect(); await db.onApplicationShutdown(); });
 const balance = (id: string) => ledger.balance(db.source.manager, id);
 async function advance(id: string) { return db.tx(async (m) => { const [r] = await m.query('SELECT state FROM matches WHERE id=$1 FOR UPDATE', [id]); const s = r.state as MatchState; await engine.drive(m, s, Math.max(Date.now(), s.deadline + 1)); await engine.persist(m, s); return engine.view(s); }); }
 describe('PostgreSQL journal under contention', () => {
@@ -94,6 +94,24 @@ describe('authoritative matches', () => {
         expect(await balance(`user:${user.id}`)).toBe(100000n);
         expect(await balance(`escrow:${id}`)).toBe(0n);
     });
+    it('starts one practice match on duplicate requests without taking a waiting human', async () => {
+        const player = await identity.create(), waiting = await identity.create();
+        await engine.queue(waiting.id, 500);
+        const results = await Promise.allSettled([
+            engine.practice(player.id, 500),
+            engine.practice(player.id, 500),
+        ]);
+        const started = results.filter(result => result.status === 'fulfilled');
+        expect(started).toHaveLength(1);
+        const { id } = started[0].value;
+        const view = await engine.get(id, player.id);
+        expect(view.players.map(p => p.bot)).toEqual([false, true]);
+        expect(await balance(`user:${player.id}`)).toBe(99500n);
+        const [queued] = await db.source.query('SELECT queue_stake, active_game FROM users WHERE id=$1', [waiting.id]);
+        expect(queued).toEqual({ queue_stake: 500, active_game: null });
+        await engine.abandon(id);
+        await engine.cancel(waiting.id);
+    });
 });
 describe('solo escrow and provable fairness', () => {
     it('reserves liability, deduplicates concurrent shots and pays cash-out once', async () => {
@@ -126,4 +144,23 @@ describe('solo escrow and provable fairness', () => {
         expect(await sha256(end.serverSeed)).toBe(seed.hash);
         await expect(solo.start(u.id, { stake: 500, seedId: seed.id, clientSeed: 'again', key: randomUUID() })).rejects.toThrow('fresh seed');
     });
+});
+
+it('ticks only due matches of the current mode, leaving future and Core work untouched', async () => {
+    const people = await Promise.all(Array.from({ length: 6 }, () => identity.create()));
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) ids.push(await db.tx(m => engine.create(m, people.slice(i * 2, i * 2 + 2), 1000)));
+    await db.source.query("UPDATE matches SET state=jsonb_set(state,'{deadline}',$2::jsonb) WHERE id=$1", [ids[0], String(Date.now() + 60000)]);
+    await db.source.query("UPDATE matches SET state=jsonb_set(state,'{deadline}','0') WHERE id=$1", [ids[1]]);
+    await db.source.query("UPDATE matches SET state=jsonb_set(state,'{deadline}','0') || jsonb_build_object('core',jsonb_build_object('action','reserve','expiresAt',$2::text)) WHERE id=$1", [ids[2], new Date(Date.now() + 60000).toISOString()]);
+    const tick = vi.spyOn(engine as unknown as { tickMatch(id: string): Promise<void> }, 'tickMatch');
+    try {
+        await engine.tick();
+        const attempted = tick.mock.calls.map(call => call[0]);
+        expect(attempted).toContain(ids[1]);
+        expect(attempted).not.toContain(ids[0]);
+        expect(attempted).not.toContain(ids[2]);
+        expect((await engine.get(ids[0], people[0].id)).results).toHaveLength(0);
+        expect((await engine.get(ids[1], people[2].id)).results).toHaveLength(1);
+    } finally { tick.mockRestore(); }
 });

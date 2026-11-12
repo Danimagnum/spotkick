@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public GHCR commit tag recorded as evidence; not a credential (run 43071313828)."
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(^|/)docs/(VERIFICATION\.md|platform-infra-additions\.md)$''']
+regexes = ['''^sha-67f725871ad3ad232d9e5666d2b564b56a5d0fc3$''']

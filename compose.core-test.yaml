@@ -1,0 +1,100 @@
+# Disposable PC-only integration stack. Never use NAS/staging data here.
+name: spotkick-core030
+x-core: &core
+  image: ghcr.io/danimagnum/platform-core@sha256:2d9c92709a0b113c849132f3403912a474691b8581175c5505da7a420ca37ca5
+  pull_policy: never
+  network_mode: service:postgres
+  environment: &core-env
+    NODE_ENV: test
+    DATABASE_URL: postgres://platform:spotkick-test@127.0.0.1:5432/core_030_test
+    REDIS_URL: redis://127.0.0.1:6379/0
+    KAFKA_BROKERS: 127.0.0.1:32992
+    KAFKA_SSL: 'false'
+    JWT_ISSUER: http://127.0.0.1:34101
+    JWT_AUDIENCE: platform-core
+    JWT_KEY_ID: spotkick-core030-test
+    JWT_PRIVATE_KEY_FILE: /app/.keys/private.pem
+    JWT_PUBLIC_KEY_FILE: /app/.keys/public.pem
+    S3_ENDPOINT: http://127.0.0.1:9000
+    S3_PUBLIC_ENDPOINT: http://127.0.0.1:9000
+    S3_REGION: us-east-1
+    S3_BUCKET: kyc-test
+    S3_ACCESS_KEY: disposable-test
+    S3_SECRET_KEY: disposable-test
+    ENABLE_TEST_ENDPOINTS: 'true'
+    PORT: '3001'
+  volumes:
+    - keys:/app/.keys:ro
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: spotkick-test
+      POSTGRES_DB: core_030_test
+    ports:
+      - '127.0.0.1:35432:5432'
+      - '127.0.0.1:36379:6379'
+      - '127.0.0.1:34101:3001'
+      - '127.0.0.1:32992:32992'
+    volumes:
+      - database:/var/lib/postgresql/data
+      - ./tests/fixtures/core030/init.sql:/docker-entrypoint-initdb.d/spotkick.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U platform -d core_030_test]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7.4-alpine
+    network_mode: service:postgres
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  kafka:
+    image: redpandadata/redpanda:v24.3.18
+    network_mode: service:postgres
+    command: [redpanda, start, --overprovisioned, --smp, '1', --memory, 512M, --reserve-memory, 0M, --node-id, '0', --check=false, --kafka-addr, '0.0.0.0:32992', --advertise-kafka-addr, '127.0.0.1:32992']
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, rpk, cluster, info, --brokers, '127.0.0.1:32992']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  keys:
+    <<: *core
+    user: root
+    volumes: [keys:/app/.keys]
+    command: [sh, -c, 'node infra/local/keys.mjs && chown -R node:node /app/.keys']
+    depends_on:
+      postgres: {condition: service_healthy}
+  migrate:
+    <<: *core
+    command: [node, dist/packages/database/src/migrate.js]
+    depends_on:
+      keys: {condition: service_completed_successfully}
+  core:
+    <<: *core
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3001/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+  worker:
+    <<: *core
+    command: [node, dist/apps/worker/src/main.js]
+    depends_on:
+      core: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+volumes:
+  database:
+  keys:
