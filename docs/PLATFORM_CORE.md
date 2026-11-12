@@ -76,3 +76,9 @@ Pull the pinned image if it is not already present, then run `pnpm test:core:mut
 The test first proves machine access is denied without a player grant. Player login activates the grant via the session API. It covers lost reserve/settle/refund responses, reconstructed engines, outage after the sporting decision, 20 concurrent settlement replays, a changed winner under the same key (409), 20 release replays, and self-exclusion through the player API. SQL asserts zero extra postings, balanced books, exact winnings/rake and no holds on rejection. Evidence is saved in [core-v020-results.json](core-v020-results.json). Two extra mutations must fail against this real image: missing player activation and unstable reserve keys.
 
 Core is not operational on the NAS and no NAS/staging test or deployment is performed. The public demo remains standalone. Proposed infrastructure changes are in [platform-infra-additions.md](platform-infra-additions.md).
+
+## Core wallet event consumer
+
+WalletEvents uses ValidatedConsumer for core.wallet.transaction_posted.v1 with group SERVICE_NAME-core-wallet-v1 and its contract DLQ. One PostgreSQL transaction inserts platform_inbox(consumer,event_id) and an internal walletChanged outbox notification for an existing Core user. Duplicates do not add notifications or ledger postings; unknown users and non-EUR events have no financial effect. Core remains the balance authority. Readiness also requires the group to be joined. Replays of malformed records must retain original identity/bytes after their cause is resolved; no automatic DLQ replay or inbox retention job is implemented here.
+
+Migration 1700000000005 adds the partial due-work index; 1700000000006 adds the transactional inbox. Both are additive. Preserve these tables and pending work when rolling back an application image.

@@ -1,3 +1,4 @@
+import { WalletEvents } from '../../apps/api/src/platform/wallet-events';
 import { writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { randomUUID, scryptSync } from 'node:crypto';
@@ -12,7 +13,7 @@ import { Ledger } from '../../apps/api/src/wallet/ledger';
 
 function isolated(name: string) {
     const url = process.env[name];
-    if (!url || !new URL(url).pathname.endsWith('_test')) throw new Error(name + ' must point to an isolated _test database');
+    if (!url || !['localhost', '127.0.0.1', '[::1]'].includes(new URL(url).hostname) || !new URL(url).pathname.endsWith('_test')) throw new Error(name + ' must point to an isolated _test database');
     return url;
 }
 
@@ -20,6 +21,7 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
     let db: Database, coreDb: ReturnType<typeof makeDataSource>, redis: RedisService;
     let core: CoreClient, engine: MatchEngine, identity: Identity;
     let proxy: Server | undefined;
+    let walletEvents: WalletEvents | undefined;
     const tokens = new Map<string, string>();
     const players: Awaited<ReturnType<Identity['auth']>>[] = [];
 
@@ -71,10 +73,14 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
             await post('/v1/testing/deposit', { amount: '5000', currency: 'EUR' }, token);
             players.push(await identity.auth(token));
         }
+        walletEvents = new WalletEvents(db);
+        walletEvents.onApplicationBootstrap();
+        await vi.waitFor(() => expect(walletEvents!.ready()).toBe(true), { timeout: 15000 });
     });
 
     afterAll(async () => {
         if (proxy) await new Promise<void>(resolve => proxy!.close(() => resolve()));
+        await walletEvents?.beforeApplicationShutdown();
         vi.unstubAllEnvs();
         await redis?.onApplicationShutdown();
         await db?.onApplicationShutdown();
@@ -176,7 +182,7 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
             { topic: 'spotkick.match.started.v1', data: { matchId: id, participantIds: [a.id, b.id] } },
             { topic: 'spotkick.match.settled.v1', data: { matchId: id, result: 'win', settlementId: settled.settlementId, winnerId: a.id } },
         ]);
-        const [beforeReplay] = await coreDb.query('SELECT COUNT(*)::int AS count FROM ledger_transactions');
+        const [beforeReplay] = await coreDb.query('SELECT COUNT(*)::int AS count FROM ledger_transactions WHERE reference=$1', ['spotkick-match:' + id]);
         const replay = () => core.match(id, 'settle', { winnerId: a.id, rakeBps: 300 });
         const retryReplay = async () => {
             for (let i = 0; ; i++) {
@@ -188,7 +194,7 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
         };
         expect(await Promise.all(Array.from({ length: 20 }, retryReplay))).toEqual(Array(20).fill({ status: 'settled', payout: '1940', rake: '60' }));
         await expect(core.match(id, 'settle', { winnerId: b.id, rakeBps: 300 })).rejects.toMatchObject({ status: 409, code: 'idempotency_conflict' });
-        expect((await coreDb.query('SELECT COUNT(*)::int AS count FROM ledger_transactions'))[0]).toEqual(beforeReplay);
+        expect((await coreDb.query('SELECT COUNT(*)::int AS count FROM ledger_transactions WHERE reference=$1', ['spotkick-match:' + id]))[0]).toEqual(beforeReplay);
         const result = await available();
         expect(result[players.findIndex(p => p.id === a.id)]).toBe('5940');
         expect(result[players.findIndex(p => p.id === b.id)]).toBe('4000');
@@ -216,9 +222,9 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
         const released = await engine.get(cancelled, a.id);
         expect(released.phase).toBe('ABANDONED');
         expect(released.settlementId).toBeTruthy();
-        const [beforeReleaseReplay] = await coreDb.query('SELECT COUNT(*)::int AS count FROM ledger_transactions');
+        const [beforeReleaseReplay] = await coreDb.query('SELECT COUNT(*)::int AS count FROM ledger_transactions WHERE reference=$1', ['spotkick-match:' + cancelled]);
         await Promise.all(Array.from({ length: 20 }, () => core.match(cancelled, 'release')));
-        expect((await coreDb.query('SELECT COUNT(*)::int AS count FROM ledger_transactions'))[0]).toEqual(beforeReleaseReplay);
+        expect((await coreDb.query('SELECT COUNT(*)::int AS count FROM ledger_transactions WHERE reference=$1', ['spotkick-match:' + cancelled]))[0]).toEqual(beforeReleaseReplay);
         expect(await available()).toEqual(result);
 
         const excluded = players.map(player => player.id).sort()[1];
@@ -230,12 +236,14 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
         expect(await coreDb.query("SELECT id FROM holds WHERE reference=$1", ['spotkick-match:' + rejected])).toEqual([]);
         expect(await db.source.query('SELECT id FROM platform_outbox WHERE aggregate_key=$1', [rejected])).toEqual([]);
         expect(lost.size).toBe(0);
+        await vi.waitFor(async () => expect((await db.source.query("SELECT COUNT(*)::int AS count FROM outbox_events WHERE topic=$1 AND payload->>'walletChanged'='true'", ['user:' + a.id]))[0].count).toBeGreaterThan(0), { timeout: 15000 });
+        expect(await db.source.query('SELECT id FROM ledger_transactions WHERE reference=$1', [id])).toEqual([]);
         const journals = await coreDb.query('SELECT operation,COUNT(*)::int AS count FROM ledger_transactions WHERE reference=$1 GROUP BY operation ORDER BY operation', ['spotkick-match:' + id]);
         if (process.env.SPOTKICK_CORE_EVIDENCE_PATH) writeFileSync(process.env.SPOTKICK_CORE_EVIDENCE_PATH, JSON.stringify({
             verifiedAt: new Date().toISOString(), coreTag: 'v0.2.0', coreCommit: '3fd3c707fc78e1f7096ed6559112106ee47d2009',
             coreImage: 'ghcr.io/danimagnum/platform-core@sha256:2d9c92709a0b113c849132f3403912a474691b8581175c5505da7a420ca37ca5',
             contracts: '0.3.0', currency: 'EUR', location: 'isolated local Docker stack, never NAS',
-            results: { playerSessionGrants: 'passed', machineWithoutPlayerGrant: '403', completedMatch: 'passed',
+            results: { coreWalletEventToTransactionalInbox: 'passed', playerSessionGrants: 'passed', machineWithoutPlayerGrant: '403', completedMatch: 'passed',
                 lostReserveReplyAndEngineRestart: 'passed', outageAfterDecision: 'passed', lostSettleReplyAndEngineRestart: 'passed',
                 concurrentSettleReplays: 20, changedWinnerSameKey: '409 idempotency_conflict', duplicateJournalTransactions: 0,
                 lostRefundReplyAndEngineRestart: 'passed', concurrentReleaseReplays: 20, selfExclusionViaPlayerSession: 'reservation rejected with zero holds',

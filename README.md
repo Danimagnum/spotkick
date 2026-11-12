@@ -74,7 +74,7 @@ The implementation uses BigInt rational arithmetic, not floating-point money. Ca
 
 The house reserves the entire next-shot payout in a solo escrow account **before accepting that shot**. Continuations top up the reserve from the house bankroll. If the bankroll or safe-integer payout capacity cannot support another shot, the request is rejected before consuming a nonce and the player can cash out. The arithmetic helper allows up to 64 goals; practical capacity is reached first. There is no unbounded, unfunded house liability.
 
-## Architecture
+## Standalone architecture
 
 ```mermaid
 flowchart LR
@@ -92,7 +92,7 @@ flowchart LR
     N1 --> S[Sentry when configured]
 ```
 
-**PostgreSQL is authoritative.** Match snapshots, choice commitments, reveals, deadlines, guest activity and ledger entries are durable. Redis is disposable: the queue can be reconstructed from durable intents; reconnect reads PostgreSQL; cached match views never contain unrevealed choices, salts or seeds.
+**PostgreSQL is authoritative for SpotKick game state.** In standalone it also owns the ledger; in platform mode Core owns identity and money while SpotKick persists decisions and pending commands. Match snapshots, choice commitments, reveals, deadlines, guest activity and ledger entries are durable. Redis is disposable: the queue can be reconstructed from durable intents; reconnect reads PostgreSQL; cached match views never contain unrevealed choices, salts or seeds.
 
 API processes keep socket connections and a periodic worker, but correctness does not depend on process-local game state or timers. Multiple workers coordinate with row locks and `SKIP LOCKED`. Redis-adapter broadcasts reach sockets connected to other API instances. The transport is WebSocket-only, so this demo does not require polling-session affinity.
 
@@ -225,7 +225,7 @@ The load script implements Engine.IO v4 / Socket.IO envelopes with built-in k6 W
 
 ## Platform integration
 
-Standalone is the default, including when CORE_URL is present. Set PLATFORM_MODE=true explicitly for Core identity, grouped wallet commands and Kafka. The API pins **@danigil/platform-contracts 0.3.0**; see [Platform Core mode](docs/PLATFORM_CORE.md). `pnpm test:contract` checks the published contract kit and adapters; `pnpm test:mutations` checks that deliberate regressions are detected against isolated test dependencies. Core v0.2.0 has passed the local EUR integration and fault/idempotency tests using its pinned release image. Player-session activation creates wallet grants; settlement uses the grouped /api/v1 settle operation. Reproduce with `pnpm test:core:mutations`; see [saved evidence](docs/core-v020-results.json). Core is not deployed/tested on NAS; the 200-match standalone load run is documented below and physical mobile acceptance remains pending.
+Standalone is the default, including when CORE_URL is present. Set PLATFORM_MODE=true explicitly for Core identity, grouped wallet commands and Kafka. The API pins **@danigil/platform-contracts 0.3.0**; see [Platform Core mode](docs/PLATFORM_CORE.md) and the [step-by-step integration guide](docs/INTEGRATION-GUIDE.md). `pnpm test:contract` checks the published contract kit and adapters; `pnpm test:mutations` checks that deliberate regressions are detected against isolated test dependencies. Core v0.2.0 has passed the local EUR integration and fault/idempotency tests using its pinned release image. Player-session activation creates wallet grants; settlement uses the grouped /api/v1 settle operation. Reproduce with `pnpm test:core:mutations`; see [saved evidence](docs/core-v020-results.json). Core is not deployed/tested on NAS; the 200-match standalone load run is documented below and physical mobile acceptance remains pending.
 
 ### 200 simultaneous matches, 12 November 2026
 

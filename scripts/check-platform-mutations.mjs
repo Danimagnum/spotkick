@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 const mutations = [
+  ['atomic inbox and notification', 'apps/api/src/platform/wallet-events.ts', 'await this.db.tx(async tx => {', 'await (async (work: any) => work(this.db.source.manager))(async (tx: any) => {', 'tests/integration/inbox.test.ts'],
+  ['transactional inbox deduplication', 'apps/api/src/platform/wallet-events.ts', 'if (!inserted.length || !message.userId', 'if (!message.userId', 'tests/integration/kafka.test.ts', 'deduplicates real wallet'],
   ['due-only deadline work', 'apps/api/src/matches/engine.ts', "AND (state->>'deadline')::bigint <= $1", 'AND ($1::bigint IS NOT NULL)', 'tests/integration/system.test.ts', 'ticks only due'],
   ['current-mode work isolation', 'apps/api/src/matches/engine.ts', "AND (state ? 'core')=$2", 'AND ($2::boolean IS NOT NULL)', 'tests/integration/system.test.ts', 'ticks only due'],
   ['full health queue recovery', 'apps/api/src/platform/operations.ts', "console.warn(JSON.stringify({ event: 'platform.health.queue_full' }));", "console.warn(JSON.stringify({ event: 'platform.health.queue_full' })); return;", 'apps/api/src/platform/operations.test.ts', 'drains a full'],

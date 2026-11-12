@@ -77,7 +77,7 @@ sum by (service, environment, mode) (rate(spotkick_settlement_errors_total[5m]))
 
 `spotkick_active_matches` es un recuento de la base compartida, por lo que **no se suma entre réplicas**. NaN indica que no pudo actualizarse; revisar también `up` y `/health/ready`. La latencia mide procesamiento de resolución y excluye espera del jugador/bloqueo previo/commit. Los contadores incluyen intentos repetidos y se reinician con el proceso.
 
-Preparar los topics `spotkick.match.started.v1`, `spotkick.match.settled.v1` y `system.health.reported.v1` y ACLs de productor. Los consumidores deben deduplicar el ID del envelope en su inbox transaccional; la cabecera `event-id` se conserva y `correlation-id` facilita trazabilidad. El servicio no inventa suscripciones de negocio. Los informes de salud usan outbox una vez escritos; hasta entonces la cola en memoria tiene 64 muestras y no sobrevive al reinicio.
+Preparar los topics `spotkick.match.started.v1`, `spotkick.match.settled.v1` y `system.health.reported.v1` y ACLs de productor. Los consumidores deben deduplicar el ID del envelope en su inbox transaccional; la cabecera `event-id` se conserva y `correlation-id` facilita trazabilidad. SpotKick consume core.wallet.transaction_posted.v1 con grupo SERVICE_NAME-core-wallet-v1: dar permiso de lectura sobre ese topic y escritura sobre core.wallet.transaction_posted.v1.dlq.{groupId}, además de los topics propios de productor. Los eventos de cartera se deduplican en platform_inbox y generan avisos, nunca dinero local. Los informes de salud usan outbox una vez escritos; hasta entonces la cola en memoria tiene 64 muestras y no sobrevive al reinicio.
 
 ## Imagen y traslado compatible
 
@@ -98,3 +98,9 @@ Usar gzip estándar (no zstd). Transferir archivo y checksum por el canal privad
 ## Aceptación pendiente de aplicar por Daniel
 
 Validar `docker-compose config`, backup/restauración en base aislada, recursos libres, arquitectura, arranque en frío y probes antes de dar tráfico. Cuando Core v0.2.0 esté operativo en ese entorno, repetir partida completa, respuestas perdidas en reserva/liquidación, cancelación y autoexclusión; reconciliar cargos, premio, comisión y holds. No fusionar por el mero hecho de publicar una imagen. La demo pública permanece standalone y su aceptación móvil con dos sesiones sigue siendo una comprobación separada.
+
+## Migraciones adicionales de SpotKick
+
+La versión final añade un índice parcial de deadlines (1700000000005) y platform_inbox (1700000000006), además del outbox previo. Son aditivos y se aplican con el bloqueo de migración existente. Preservar inbox/outbox y los volúmenes en un rollback de aplicación. No ejecutar down para borrar evidencia financiera/de entrega. Revisar retención de inbox, outbox y DLQ antes de un entorno de larga duración; esta PR no elimina filas automáticamente. La readiness de plataforma incluye al consumidor Kafka unido al grupo.
+
+La medición de 200 partidas se hizo en el PC con dos APIs, en standalone y con un choice window de 60 segundos; no acredita que esa carga quepa en el NAS ni que Core soporte ese mismo throughput. Ver el README y los JSON antes/después. Nada de lo descrito aquí se ha aplicado en platform-infra.

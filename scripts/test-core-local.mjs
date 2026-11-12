@@ -9,7 +9,7 @@ if (image.Os !== 'linux' || image.Architecture !== 'amd64' || image.Config.Label
     image.Config.Labels['org.opencontainers.image.version'] !== release.tag.slice(1) || !image.RepoDigests.includes(release.image))
     throw new Error('Loaded Core image does not match the pinned release');
 const base = 'http://127.0.0.1:34101';
-const env = { ...process.env, DATABASE_URL: 'postgres://platform:spotkick-test@127.0.0.1:35432/spotkick_030_test',
+const env = { ...process.env, SERVICE_NAME: 'spotkick-core-test', DATABASE_URL: 'postgres://platform:spotkick-test@127.0.0.1:35432/spotkick_030_test',
     REDIS_URL: 'redis://127.0.0.1:36379/1', CORE_URL: base, CORE_ISSUER: base, CORE_AUDIENCE: 'platform-core',
     CORE_JWKS_URL: base + '/.well-known/jwks.json', KAFKA_BROKERS: '127.0.0.1:32992', SPOTKICK_CORE_E2E: '1',
     SPOTKICK_CORE_TEST_DATABASE_URL: 'postgres://platform:spotkick-test@127.0.0.1:35432/core_030_test',

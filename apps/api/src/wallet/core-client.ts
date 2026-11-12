@@ -1,13 +1,12 @@
 import { Injectable, ServiceUnavailableException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { createPublicKey, createHash, type KeyObject } from 'node:crypto';
 import { z } from 'zod';
-import { createAuthVerifier, createClientCredentialsProvider, WalletClient, WalletApiError, type WalletRequest, type WalletResponse } from '@danigil/platform-contracts';
+import { balanceSchema, createAuthVerifier, createClientCredentialsProvider, WalletClient, WalletApiError, type WalletRequest, type WalletResponse } from '@danigil/platform-contracts';
 import { coreEnabled } from '../platform-config';
 
 const userId = z.string().uuid();
 const userSchema = z.object({ id: userId, displayName: z.string().min(1).max(80) });
 const walletSchema = z.object({
-    available: z.string().regex(/^\d+$/),
     movements: z.array(z.object({ amount: z.string(), operation: z.string(), created_at: z.string() })),
 });
 type Action = 'reserve' | 'settle' | 'release';
@@ -206,7 +205,10 @@ export class CoreClient {
     }
 
     async wallet(id: string) {
-        return walletSchema.parse(await this.service('/api/v1/spotkick/users/' + userId.parse(id) + '/wallet'));
+        const result = await this.service('/api/v1/spotkick/users/' + userId.parse(id) + '/wallet');
+        const balance = balanceSchema.parse(result);
+        if (balance.currency !== 'EUR') throw new CoreRequestError(422, 'currency_not_supported');
+        return { ...balance, ...walletSchema.parse(result) };
     }
 
     checkReadiness() { return this.request('/health/ready'); }

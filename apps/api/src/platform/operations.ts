@@ -1,4 +1,5 @@
 import { Controller, Get, Header, Injectable, ServiceUnavailableException, type BeforeApplicationShutdown, type OnApplicationBootstrap } from '@nestjs/common';
+import { WalletEvents } from './wallet-events';
 import { GameMetrics } from './game-metrics';
 import type { EventData } from '@danigil/platform-contracts';
 import { randomUUID } from 'node:crypto';
@@ -46,7 +47,7 @@ export class Operations implements OnApplicationBootstrap, BeforeApplicationShut
     private gameQuery?: Promise<number>;
     private gameRefreshUntil = 0;
 
-    constructor(private db: Database, private redis: RedisService, private kafka: KafkaTransport, private core: CoreClient, private game: GameMetrics = new GameMetrics()) {}
+    constructor(private db: Database, private redis: RedisService, private kafka: KafkaTransport, private core: CoreClient, private game: GameMetrics = new GameMetrics(), private walletEvents?: WalletEvents) {}
 
     onApplicationBootstrap() {
         if (!platformMode()) return;
@@ -165,7 +166,7 @@ export class Operations implements OnApplicationBootstrap, BeforeApplicationShut
             platformMode() ? this.dependency('core', () => this.core.checkReadiness()) : Promise.resolve(true),
         ]);
         if (!database || !redis) return 'unhealthy';
-        return broker && core ? 'healthy' : 'degraded';
+        return broker && core && (!this.walletEvents || this.walletEvents.ready()) ? 'healthy' : 'degraded';
     }
 
     private async report() {
