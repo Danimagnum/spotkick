@@ -47,7 +47,11 @@ export class Runtime implements BeforeApplicationShutdown, OnApplicationBootstra
             await this.engine.tick(() => this.stopping);
             if (this.stopping) return;
             if (this.pulses++ % 4 === 0) {
-                await this.engine.matchmake();
+                const matchmakingStarted = performance.now();
+                for (let i = 0; i < 32 && !this.stopping; i++) {
+                    if (!await this.engine.matchmake()) break;
+                    if (performance.now() - matchmakingStarted >= 250) break;
+                }
                 this.server.emit('lobby', await this.lobby());
             }
             await this.db.tx(async (m) => {

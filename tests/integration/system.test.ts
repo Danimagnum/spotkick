@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, describe, it, expect } from 'vitest';
+import { beforeAll, afterAll, describe, it, expect, vi } from 'vitest';
 import { randomUUID, createHmac } from 'node:crypto';
 import { commitment, sha256, zones, Zone } from '@spotkick/shared';
 import { Database } from '../../apps/api/src/database/db';
@@ -144,4 +144,23 @@ describe('solo escrow and provable fairness', () => {
         expect(await sha256(end.serverSeed)).toBe(seed.hash);
         await expect(solo.start(u.id, { stake: 500, seedId: seed.id, clientSeed: 'again', key: randomUUID() })).rejects.toThrow('fresh seed');
     });
+});
+
+it('ticks only due matches of the current mode, leaving future and Core work untouched', async () => {
+    const people = await Promise.all(Array.from({ length: 6 }, () => identity.create()));
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) ids.push(await db.tx(m => engine.create(m, people.slice(i * 2, i * 2 + 2), 1000)));
+    await db.source.query("UPDATE matches SET state=jsonb_set(state,'{deadline}',$2::jsonb) WHERE id=$1", [ids[0], String(Date.now() + 60000)]);
+    await db.source.query("UPDATE matches SET state=jsonb_set(state,'{deadline}','0') WHERE id=$1", [ids[1]]);
+    await db.source.query("UPDATE matches SET state=jsonb_set(state,'{deadline}','0') || jsonb_build_object('core',jsonb_build_object('action','reserve','expiresAt',$2::text)) WHERE id=$1", [ids[2], new Date(Date.now() + 60000).toISOString()]);
+    const tick = vi.spyOn(engine as unknown as { tickMatch(id: string): Promise<void> }, 'tickMatch');
+    try {
+        await engine.tick();
+        const attempted = tick.mock.calls.map(call => call[0]);
+        expect(attempted).toContain(ids[1]);
+        expect(attempted).not.toContain(ids[0]);
+        expect(attempted).not.toContain(ids[2]);
+        expect((await engine.get(ids[0], people[0].id)).results).toHaveLength(0);
+        expect((await engine.get(ids[1], people[2].id)).results).toHaveLength(1);
+    } finally { tick.mockRestore(); }
 });

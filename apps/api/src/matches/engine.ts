@@ -104,7 +104,7 @@ export class MatchEngine {
         const ids = await this.redis.client.zrange(queueKey(core), 0, 49);
         if (!ids.length)
             return;
-        await this.db.tx(async (m) => {
+        const matched = await this.db.tx(async (m) => {
             const [{ locked }] = await m.query('SELECT pg_try_advisory_xact_lock($1) AS locked', [core ? 481592 : 481591]);
             if (!locked)
                 return;
@@ -127,7 +127,7 @@ export class MatchEngine {
                 if (botCutoff === null || Number(a.queued_at) > botCutoff) return;
                 b = await this.identity.create(true, m);
             }
-            await this.create(m, [a, b].map(p => ({ id: p.id, name: p.name, bot: p.bot })), a.queue_stake);
+            return this.create(m, [a, b].map(p => ({ id: p.id, name: p.name, bot: p.bot })), a.queue_stake);
         });
         const stillWaiting = new Set((await this.db.source.query('SELECT id FROM users WHERE queue_stake IS NOT NULL AND core_user=$1', [core])).map((x: {
             id: string;
@@ -135,6 +135,7 @@ export class MatchEngine {
         const stale = ids.filter(id => !stillWaiting.has(id));
         if (stale.length)
             await this.redis.client.zrem(queueKey(core), ...stale);
+        return Boolean(matched);
     }
     async create(m: EntityManager, players: Player[], stake: number) {
         players = players.map(({id,name,bot}) => ({id,name,bot}));
@@ -276,7 +277,10 @@ export class MatchEngine {
         });
     }
     async tick(stopping = () => false) {
-        const active = await this.db.source.query("SELECT id FROM matches WHERE status NOT IN ('SETTLED','ABANDONED')");
+        const active = await this.db.source.query(`SELECT id FROM matches
+            WHERE status NOT IN ('SETTLED','ABANDONED') AND (state ? 'core')=$2
+              AND (state->>'deadline')::bigint <= $1 AND NOT COALESCE((state->'core') ? 'failure',false)
+            ORDER BY (state->>'deadline')::bigint,id LIMIT 100`, [Date.now(), this.identity.core.enabled]);
         for (const { id } of active) {
             if (stopping()) break;
             await this.tickMatch(id);

@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 const mutations = [
+  ['due-only deadline work', 'apps/api/src/matches/engine.ts', "AND (state->>'deadline')::bigint <= $1", 'AND ($1::bigint IS NOT NULL)', 'tests/integration/system.test.ts', 'ticks only due'],
+  ['current-mode work isolation', 'apps/api/src/matches/engine.ts', "AND (state ? 'core')=$2", 'AND ($2::boolean IS NOT NULL)', 'tests/integration/system.test.ts', 'ticks only due'],
   ['full health queue recovery', 'apps/api/src/platform/operations.ts', "console.warn(JSON.stringify({ event: 'platform.health.queue_full' }));", "console.warn(JSON.stringify({ event: 'platform.health.queue_full' })); return;", 'apps/api/src/platform/operations.test.ts', 'drains a full'],
   ['observation-time health metrics', 'apps/api/src/platform/operations.ts', '...sample.window', '...this.window(sample.at.getTime())', 'apps/api/src/platform/operations.test.ts', 'drains a full'],
   ['readiness dependency checks', 'apps/api/src/platform/operations.ts', "if (!database || !redis) return 'unhealthy';", "if (false) return 'unhealthy';", 'tests/integration/operations.test.ts', 'serves real probes'],

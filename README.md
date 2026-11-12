@@ -225,7 +225,22 @@ The load script implements Engine.IO v4 / Socket.IO envelopes with built-in k6 W
 
 ## Platform integration
 
-Standalone is the default, including when CORE_URL is present. Set PLATFORM_MODE=true explicitly for Core identity, grouped wallet commands and Kafka. The API pins **@danigil/platform-contracts 0.3.0**; see [Platform Core mode](docs/PLATFORM_CORE.md). `pnpm test:contract` checks the published contract kit and adapters; `pnpm test:mutations` checks that deliberate regressions are detected against isolated test dependencies. Core v0.2.0 has passed the local EUR integration and fault/idempotency tests using its pinned release image. Player-session activation creates wallet grants; settlement uses the grouped /api/v1 settle operation. Reproduce with `pnpm test:core:mutations`; see [saved evidence](docs/core-v020-results.json). Core is not deployed/tested on NAS; expanded load figures and mobile acceptance remain pending.
+Standalone is the default, including when CORE_URL is present. Set PLATFORM_MODE=true explicitly for Core identity, grouped wallet commands and Kafka. The API pins **@danigil/platform-contracts 0.3.0**; see [Platform Core mode](docs/PLATFORM_CORE.md). `pnpm test:contract` checks the published contract kit and adapters; `pnpm test:mutations` checks that deliberate regressions are detected against isolated test dependencies. Core v0.2.0 has passed the local EUR integration and fault/idempotency tests using its pinned release image. Player-session activation creates wallet grants; settlement uses the grouped /api/v1 settle operation. Reproduce with `pnpm test:core:mutations`; see [saved evidence](docs/core-v020-results.json). Core is not deployed/tested on NAS; the 200-match standalone load run is documented below and physical mobile acceptance remains pending.
+
+### 200 simultaneous matches, 12 November 2026
+
+Two native API instances reached **200 active matches / 400 Socket.IO connections**, completed 200/200 matches and passed 400/400 wallet checks. No command/HTTP errors, timeout exchanges, negative spendable accounts or ledger imbalance were observed.
+
+| Measurement | Before | After |
+|---|---:|---:|
+| Peak active matches | 48 | **200** |
+| Complete-match p95, including queue/barriers | 126.48 s | **52.78 s** |
+| HTTP p95 | 247.12 ms | **167.63 ms** |
+| Successful player iterations | 400/400 | 400/400 |
+
+The bottleneck was one pairing per runtime cycle and per-match polling before deadlines. Pairing now runs in bounded batches (up to 32 / 250 ms budget), and an indexed, bounded query selects only due matches for the current mode. Financial transactions and locks are unchanged. Saved [before](docs/load-200-before.json) and [after](docs/load-200-after.json) evidence includes 250 ms concurrency samples and SQL audits.
+
+Exact workload: standalone, 200 pairs, one iteration per player, guests created before connection, queue barrier +5 s and first-choice barrier +25 s. CHOICE_MS=60000, REVEAL_MS=3000, RESULT_MS=1600, BOT_AFTER_MS=60000, GUEST_RATE_LIMIT=2000. The barrier and longer choice window are intentional; this is not a benchmark of the default 10-second window, Core throughput or NAS capacity. Workstation: Windows 10.0.26200, i5-11400F / 12 logical CPUs, 16 GiB RAM; Node 24.17.0, k6 2.3.0; Docker 29.9.2 / WSL, PostgreSQL 17.11 and Redis 7.4. APIs listen on loopback test endpoints 34311/34312; each run creates its own database and preserves it. With the local test stack dependencies running, execute `K6_BIN=<path> pnpm test:load:200` (set the variable using your shell). The runner stops only its own API processes afterward.
 
 ## Configuration and observability
 

@@ -16,7 +16,8 @@
     "test:mutations": "node scripts/check-platform-mutations.mjs",
     "test:secrets": "node scripts/scan-secrets.mjs",
     "test:core": "node scripts/test-core-local.mjs",
-    "test:core:mutations": "node scripts/test-core-local.mjs --mutations"
+    "test:core:mutations": "node scripts/test-core-local.mjs --mutations",
+    "test:load:200": "node scripts/load-two-instances.mjs"
   },
   "devDependencies": {
     "@danigil/platform-contracts": "0.3.0",
