@@ -12,7 +12,7 @@ Start with the [five-minute demo](docs/DEMO.md), the [engineering case study](do
 
 For a detailed Windows checklist with commands, manual test cases and publication gates, see the [Spanish validation and publication guide](docs/GUIA_PUBLICACION.md). Its optional `compose.acceptance.yaml` uses separate local ports and supports a second API for load tests.
 
-The project is intended as an inspectable portfolio demo. Its strongest evidence is the combination of playable flows, real database contention tests and completed matches across two API instances. A public demo URL, remote CI run and container validation are still pending; those are not implied by the screenshots or local test results.
+The project is intended as an inspectable portfolio demo. Its strongest evidence is the combination of playable flows, real database contention tests and completed matches across two API instances. Remote CI, container publication and local Core fault tests have been executed; see [verification evidence](docs/VERIFICATION.md). The owner reports a standalone NAS/Funnel demo, but its current URL and physical mobile acceptance have not been independently verified in this integration run.
 
 ## Run it
 
@@ -274,16 +274,22 @@ After verify and secrets pass, a push to this PR branch or main publishes `ghcr.
 ## How it scales
 
 - **API instances:** durable state and database deadlines allow horizontal API replication. Use a reverse proxy, health checks and WebSocket-aware connection draining. The Redis adapter fans room events across instances; recovery always retrieves a durable snapshot.
-- **Room sharding:** assign match IDs consistently to worker shards. The current MVP scans active matches; production should index scheduled deadlines and claim bounded due batches instead. Keep authoritative transitions under database locks even after routing changes.
+- **Room sharding:** assign match IDs consistently to worker shards. The runtime now uses a partial deadline index and bounded due batches; further scaling can shard deadline ownership. Keep authoritative transitions under database locks even after routing changes.
 - **Matchmaking:** Redis sorted sets index queue order. PostgreSQL intents repair cache loss and prevent a user entering multiple funded games. The MVP serializes matching with an advisory lock; shard queues/claims by stake and region for higher throughput and fairer independent buckets.
 - **Ledger hot spots:** shared house-rake and house-bankroll rows deliberately serialize conflicting transfers. Use sharded house accounts, batched rake collection and ledger checkpoints/materialized balance projections with transactional invariant checks as volume grows. Index and archive old journal partitions without losing auditability.
 - **Outbox:** row claims prevent competing publishers processing the same pending batch simultaneously. A crash after emit but before marking published can duplicate events, so versions and idempotent commands remain essential. Partition outbox workers, prune delivered events under retention policy and monitor backlog age.
 - **Presence/lobby:** Redis TTL-style presence tolerates reloads and multiple tabs. The current lobby aggregates PostgreSQL once per second per API instance; move those aggregates into a single materialized/pub-sub feed at scale. Queue and presence keys also need bounded retention cleanup.
 - **Availability:** Redis failure pauses matchmaking/broadcasts while durable money remains in PostgreSQL. A browser reconnects to reconstruct state. Database failure rejects mutations; it never invents a local balance. Use managed PostgreSQL failover, Redis recovery and consistent backups before exposing a service.
 
+## Verified and unverified
+
+Verified locally: pinned Core v0.2.0 / contracts 0.3.0 (EUR), player-session grants, fault/replay cases with zero duplicate journal writes, Kafka inbox/DLQ and SQL rollback, 200 simultaneous standalone matches across two APIs, 21 unit/contract tests, 20 standard real-dependency integration tests plus the separate real-Core scenario, and 14 deliberate mutations (12 standard, two against Core). CI checks, Playwright and image publication are linked on [PR #1](https://github.com/Danimagnum/spotkick/pull/1). See [the guide](docs/INTEGRATION-GUIDE.md) and [executed evidence](docs/VERIFICATION.md).
+
+Unverified here: physical mobile/two-session access to Funnel; NAS Core deployment, image import/resources/rollback; Core/default-10-second-window capacity; KYC blob/review workflow and real funding; portal refresh-token renewal. The 200-match test used standalone and a 60-second choice window. Infrastructure proposals are documented only and the public demo retains its standalone deployment.
+
 ## Next steps and explicit limits
 
-This is an engineering MVP. Next work: registered identities and recovery, transport-wide rate limits, signed commitment receipts, independently published fairness transcripts, stronger non-reveal economics, seed-vault access separation, tested multi-instance failure injection, a ledger read projection, dead-letter/outbox alerting, player display names, keyboard shortcuts and a wider accessibility audit.
+This is an engineering MVP. Next work: standalone guest recovery and platform portal-token renewal, transport-wide rate limits, signed commitment receipts, independently published fairness transcripts, stronger non-reveal economics, seed-vault access separation, tested multi-instance failure injection, a ledger read projection, dead-letter/outbox alerting, player display names, keyboard shortcuts and a wider accessibility audit.
 
 The API database role currently owns its schema so automatic migrations can run. A hardened deployment should separate migration ownership from a restricted runtime role. Database administrators can always disable triggers; database controls are not protection against the operator itself. Browser tokens use localStorage for demo simplicity; authenticated production would warrant a reviewed session and XSS model.
 
@@ -306,4 +312,4 @@ Implementation references: [NestJS Redis adapter](https://docs.nestjs.com/websoc
 
 ## Portfolio hosting
 
-Public source: [Danimagnum/spotkick](https://github.com/Danimagnum/spotkick). For the existing DS918+, see [Synology deployment](docs/SYNOLOGY.md). A generic production overlay is also documented in [deployment preparation](docs/DEPLOYMENT.md). Public DNS, NAS access and external acceptance are pending; no live public demo is claimed yet.
+Public source: [Danimagnum/spotkick](https://github.com/Danimagnum/spotkick). For the existing DS918+, see [Synology deployment](docs/SYNOLOGY.md). A generic production overlay is also documented in [deployment preparation](docs/DEPLOYMENT.md). The owner reports the existing standalone demo on Tailscale Funnel. This integration did not redeploy it or test Core on the NAS. Physical mobile/two-session acceptance, NAS Core deployment/import/resources and staging rollback remain separate pending checks.
