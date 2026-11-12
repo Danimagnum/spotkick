@@ -8,7 +8,7 @@ SpotKick uses the demo ledger by default and starts without Kafka or Core. Set `
 
 Set `SERVICE_NAME`, `DATABASE_URL`, `REDIS_URL`, `KAFKA_BROKERS`, `CORE_URL`, `CORE_JWKS_URL`, `CORE_ISSUER`, `CORE_AUDIENCE`, `CORE_CLIENT_ID` and `CORE_CLIENT_SECRET` on the SpotKick API. The API binds to `0.0.0.0`, with `PORT` defaulting to `3000` in platform mode and `3001` in demo. Use `http://127.0.0.1:4101` for a host-run local Core API and HTTPS outside loopback. Keep client credentials server-side. Configure the issuer and audience to match Core, and set the trusted JWKS endpoint independently of the issuer.
 
-Provision a Core client with `spotkick:matches` and write grants for both players' EUR cash wallets. Each player needs a verified Core account, available funds and responsible-gaming capacity. Users sign in with their Core credentials. The browser keeps the short-lived access token for the current tab and prompts for sign-in again when it expires.
+Provision a Core client with `spotkick:matches`. SpotKick validates the player JWT and `/v1/me`, then calls `POST /v1/services/:clientId/activate` with that player session and a stable activation key; Core grants that player's EUR cash wallet. It does not use machine credentials to grant player access. Each player needs a verified Core account, available funds and responsible-gaming capacity. Users sign in with their Core credentials. The browser keeps the short-lived access token for the current tab and prompts for sign-in again when it expires.
 
 ## Match lifecycle
 
@@ -22,7 +22,7 @@ A definitive wallet conflict leaves the command and decision available for recon
 
 ## Platform events and operations
 
-The API pins `@danigil/platform-contracts@0.2.0` from npm. Events use its Zod registry and `ValidatedProducer`; there are no vendored event schemas. Grouped money writes use its `WalletClient` and request/response types. JWT verification uses `createAuthVerifier` with the existing cached, trusted JWKS resolver; machine tokens use `createClientCredentialsProvider`. Match facts are stored in `platform_outbox` in the same transaction as the confirmed state. The relay sends with an aggregate key, the `event-id` header and broker acknowledgements before marking the row. Failed deliveries are scheduled for retry after 30 seconds. Earlier unpublished events block only later events with the same topic and aggregate key. Consumers deduplicate by event ID. Prepare the three topics and broker permissions before starting platform mode. SpotKick uses the broker listener advertised to the API.
+The API pins `@danigil/platform-contracts@0.3.0` from npm. Events use its Zod registry and `ValidatedProducer`; there are no vendored event schemas. Grouped money writes use its `WalletClient` and request/response types. JWT verification uses `createAuthVerifier` with the existing cached, trusted JWKS resolver; machine tokens use `createClientCredentialsProvider`. Match facts are stored in `platform_outbox` in the same transaction as the confirmed state. The relay sends with an aggregate key, the `event-id` header and broker acknowledgements before marking the row. Failed deliveries are scheduled for retry after 30 seconds. Earlier unpublished events block only later events with the same topic and aggregate key. Consumers deduplicate by event ID. Prepare the three topics and broker permissions before starting platform mode. SpotKick uses the broker listener advertised to the API.
 
 - `spotkick.match.started.v1` follows confirmation of both stakes.
 - `spotkick.match.settled.v1` follows a confirmed payment or refund. It includes the persisted `settlementId`. A tie in regulation continues into sudden death.
@@ -53,7 +53,7 @@ pnpm exec vitest run tests/integration/core-wallet.test.ts
 
 The test provisions disposable verified users and a scoped client. A loopback HTTP proxy drops the reserve and settlement responses after Core commits, so SpotKick must recover through the real client retry path. The test checks payout, rake, balanced ledger postings, outbox facts, cancellation and a rejection with no holds or started fact.
 
-## Contract verification (0.2.0)
+## Contract verification (0.3.0)
 
 `pnpm test:contract` runs the official package test kit and adapter tests. Integration tests validate actual outgoing grouped requests and stored outbox payloads; fixtures include the contract HTTP statuses and machine-token fields. `pnpm test:mutations` deliberately breaks opt-in, event validation and money idempotency and requires assertion failures before restoring each source file. Run it with the same isolated PostgreSQL and Redis as integration tests. CI runs both commands.
 
@@ -67,6 +67,12 @@ The existing `/api/v1/spotkick/users/:id/wallet` summary and identity/login rout
 
 Health remains process liveness (200) when PostgreSQL or Redis is unavailable; readiness returns 503. Integration tests close actual database and Redis connections, check HTTP responses and recovery, authenticate a real Socket.IO connection, compare the active-match gauge with SQL, and validate periodic/change events in the real PostgreSQL outbox. The Core/broker readiness values in that event-specific test are controlled doubles, not Core compatibility evidence.
 
-## Core release gate
+## Pinned local release
 
-Platform Core is not yet tagged. Payout from house, partial capture and the permissions API in /api/v1 remain incomplete according to the owner. The service integration stays open until Core v0.2.0 is supplied and real-Core fault tests pass. Do not enable the public demo or staging against an unverified Core release.
+Verified locally against Core **v0.2.0**, commit `3fd3c707fc78e1f7096ed6559112106ee47d2009`, using the exact image in `tests/fixtures/core030/release.json`. Only EUR is enabled. The contract 0.3.0 keeps SpotKick's grouped reserve/settle/release operations at `/api/v1/spotkick/matches/:id/*`; settlement remains one atomic Core transaction, not separate capture and payout calls. Identity/session and player activation remain on their actual `/v1` routes.
+
+Pull the pinned image if it is not already present, then run `pnpm test:core:mutations`. `compose.core-test.yaml` creates a dedicated PC-only PostgreSQL, Redis, Kafka and Core namespace; the runner checks image revision/architecture/digest and the live Core commit before testing. By default it stops the stack afterward and preserves volumes. It never reads a NAS/staging URL. The fixtures set KYC to verified directly and use Core's test deposit endpoint; blob upload/KYC review are not covered.
+
+The test first proves machine access is denied without a player grant. Player login activates the grant via the session API. It covers lost reserve/settle/refund responses, reconstructed engines, outage after the sporting decision, 20 concurrent settlement replays, a changed winner under the same key (409), 20 release replays, and self-exclusion through the player API. SQL asserts zero extra postings, balanced books, exact winnings/rake and no holds on rejection. Evidence is saved in [core-v020-results.json](core-v020-results.json). Two extra mutations must fail against this real image: missing player activation and unstable reserve keys.
+
+Core is not operational on the NAS and no NAS/staging test or deployment is performed. The public demo remains standalone. Proposed infrastructure changes are in [platform-infra-additions.md](platform-infra-additions.md).

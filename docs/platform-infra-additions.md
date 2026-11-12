@@ -2,9 +2,11 @@
 
 Este documento es una propuesta para Daniel. No se ha editado `platform-infra` ni desplegado ningún stack del NAS. La demo Funnel conserva su imagen, datos y `PLATFORM_MODE=false`.
 
-## Bloqueo de Core
+## Core verificado localmente; NAS pendiente
 
-Core todavía no está etiquetado; están pendientes payout desde house, captura parcial y API de permisos de `/api/v1`. Mantener la integración y la PR abiertas hasta recibir **Core v0.2.0** y repetir las pruebas reales. No sustituir la reserva/liquidación agrupada de SpotKick por llamadas independientes a holds y transferencias. El paquete npm 0.2.0 no acredita que el servidor implemente sus operaciones.
+La integración se ha probado en el PC contra Core **v0.2.0**, commit `3fd3c707fc78e1f7096ed6559112106ee47d2009`, con contratos **0.3.0**, solo EUR. La referencia exacta está en `tests/fixtures/core030/release.json` y los resultados en `docs/core-v020-results.json`. Core todavía no está operativo en el NAS: no se ha probado ni desplegado staging. Las operaciones agrupadas de SpotKick en `/api/v1/spotkick/matches/:id/reserve|settle|release` siguen vigentes en 0.3.0 y preservan la liquidación atómica.
+
+Los grants del jugador se crean con su bearer mediante `POST /v1/services/:clientId/activate` y clave idempotente estable. Las credenciales de máquina no conceden acceso a carteras de jugadores. Provisionar antes el cliente SpotKick con `spotkick:matches`; no editar manualmente los grants de usuario para suplir la activación. La autorización se limita a las carteras EUR de ese jugador. No cambiar la demo a modo plataforma.
 
 ## Imagen ya publicada y verificada
 
@@ -15,8 +17,8 @@ El [workflow 43071313828](https://github.com/Danimagnum/spotkick/actions/runs/43
 La copia de `platform-infra/docker-compose.yml` revisada ya contiene un servicio `spotkick`, una base/rol `spotkick` y el target Prometheus `spotkick:3000`. Hay que actualizar esas entradas, no duplicarlas:
 
 1. Sustituir el ejemplo `ghcr.io/danigil/spotkick:0.1.0` por `ghcr.io/danimagnum/spotkick-api:sha-<SHA completo verificado>`, preferiblemente por su digest publicado en el resumen de GitHub Actions. El workflow de SpotKick publica solo la API, para linux/amd64, después de verify y secrets. No publica `latest` ni despliega.
-2. Declarar explícitamente `PLATFORM_MODE=false` hasta superar el bloqueo de Core. Al habilitar plataforma, usar `SERVICE_NAME=spotkick`, `PORT=3000`, una base propia y las credenciales del entorno. Conservar el role/database existentes; no reinicializar el volumen para ejecutar scripts de init.
-3. Cuando llegue Core v0.2.0, provisionar el cliente `spotkick:matches` y permisos de escritura para las dos carteras EUR de los jugadores de prueba por el procedimiento real de Core. No inventar una ruta de permisos ni incluir secretos en Git. Activar entonces `PLATFORM_MODE=true`, `CORE_URL`, `CORE_CLIENT_ID`, `CORE_CLIENT_SECRET`, `CORE_JWKS_URL`, `CORE_ISSUER` y `CORE_AUDIENCE` con valores confirmados.
+2. Declarar explícitamente `PLATFORM_MODE=false` para standalone; habilitar plataforma solo en un entorno privado que ya tenga el Core fijado y el cliente provisionado. Al habilitar plataforma, usar `SERVICE_NAME=spotkick`, `PORT=3000`, una base propia y las credenciales del entorno. Conservar el role/database existentes; no reinicializar el volumen para ejecutar scripts de init.
+3. Para desplegar Core v0.2.0, provisionar el cliente `spotkick:matches` y permisos de escritura para las dos carteras EUR de los jugadores de prueba por el procedimiento real de Core. No inventar una ruta de permisos ni incluir secretos en Git. Activar entonces `PLATFORM_MODE=true`, `CORE_URL`, `CORE_CLIENT_ID`, `CORE_CLIENT_SECRET`, `CORE_JWKS_URL`, `CORE_ISSUER` y `CORE_AUDIENCE` con valores confirmados.
 4. Revisar el transporte de Core. SpotKick exige HTTPS fuera de loopback para las llamadas al monedero y OAuth. El bridge genérico `http://core:3000` no sirve para ese adaptador. Usar un endpoint HTTPS interno verificable o compartir el namespace de Core y configurar su puerto real en `127.0.0.1`, asignando otro `PORT` a SpotKick. El issuer del JWT sigue siendo el valor exacto de Core y no se sustituye por la dirección de transporte.
 5. `environment` explícito prevalece sobre `.env.spotkick`: ajustar también los valores heredados de `x-backend-env` si cambia el networking. Para Compose 1.28 usar `env_file: ['.env.spotkick']`; el formato `path/required` de la configuración moderna no es compatible.
 6. Conservar PostgreSQL, Redis y Kafka fuera de interfaces públicas. El perfil actual publica algunos puertos en loopback del PC; no cambiar a `0.0.0.0` ni trasladar esos mappings al NAS.
@@ -95,4 +97,4 @@ Usar gzip estándar (no zstd). Transferir archivo y checksum por el canal privad
 
 ## Aceptación pendiente de aplicar por Daniel
 
-Validar `docker-compose config`, backup/restauración en base aislada, recursos libres, arquitectura, arranque en frío y probes antes de dar tráfico. Cuando exista Core v0.2.0, ejecutar partida completa, respuestas perdidas en reserva/liquidación, cancelación y autoexclusión; reconciliar cargos, premio, comisión y holds. No fusionar por el mero hecho de publicar una imagen. La demo pública permanece standalone y su aceptación móvil con dos sesiones sigue siendo una comprobación separada.
+Validar `docker-compose config`, backup/restauración en base aislada, recursos libres, arquitectura, arranque en frío y probes antes de dar tráfico. Cuando Core v0.2.0 esté operativo en ese entorno, repetir partida completa, respuestas perdidas en reserva/liquidación, cancelación y autoexclusión; reconciliar cargos, premio, comisión y holds. No fusionar por el mero hecho de publicar una imagen. La demo pública permanece standalone y su aceptación móvil con dos sesiones sigue siendo una comprobación separada.

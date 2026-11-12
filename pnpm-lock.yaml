@@ -9,8 +9,8 @@ importers:
   .:
     devDependencies:
       '@danigil/platform-contracts':
-        specifier: 0.2.0
-        version: 0.2.0(@nestjs/common@11.2.8(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(reflect-metadata@0.2.2)(rxjs@7.8.2)
+        specifier: 0.3.0
+        version: 0.3.0(@nestjs/common@11.2.8(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@playwright/test':
         specifier: ^1.58.0
         version: 1.64.1
@@ -30,8 +30,8 @@ importers:
   apps/api:
     dependencies:
       '@danigil/platform-contracts':
-        specifier: 0.2.0
-        version: 0.2.0(@nestjs/common@11.2.8(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(reflect-metadata@0.2.2)(rxjs@7.8.2)
+        specifier: 0.3.0
+        version: 0.3.0(@nestjs/common@11.2.8(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/common':
         specifier: ^11.1.0
         version: 11.2.8(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1)
@@ -203,8 +203,8 @@ packages:
   '@borewit/text-codec@0.2.3':
     resolution: {integrity: sha512-49CycTz1aAZmvFcwkeFyhud1HUmRIB5Tabf7ALV+VA4Iu85MTfz2cUwzPagMFAdVBvrWdkCxG67I30tUwwpKsw==}
 
-  '@danigil/platform-contracts@0.2.0':
-    resolution: {integrity: sha512-hE7rnhqopB/fq85iBxAA1koSreLP2aSte/WoG9WjZs0/fS69ZdktUH/cNBPbFO1PqFxM2eddJnRchhjCrxRCvw==}
+  '@danigil/platform-contracts@0.3.0':
+    resolution: {integrity: sha512-xSHcISpEQ3R6HWEPZ8vznRVn7hzBYabQNBvDkB4whV6Z73jmR8wDp7NWqdHOeFTEV3BLNlu0IjgUkttI/C7LoQ==}
     engines: {node: '>=22.13.0'}
     peerDependencies:
       '@nestjs/common': ^10 || ^11
@@ -2950,7 +2950,7 @@ snapshots:
 
   '@borewit/text-codec@0.2.3': {}
 
-  '@danigil/platform-contracts@0.2.0(@nestjs/common@11.2.8(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(reflect-metadata@0.2.2)(rxjs@7.8.2)':
+  '@danigil/platform-contracts@0.3.0(@nestjs/common@11.2.8(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(reflect-metadata@0.2.2)(rxjs@7.8.2)':
     dependencies:
       jose: 6.2.17
       kafkajs: 2.2.4

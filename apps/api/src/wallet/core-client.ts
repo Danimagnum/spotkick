@@ -1,5 +1,5 @@
-import { Injectable, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
-import { createPublicKey, type KeyObject } from 'node:crypto';
+import { Injectable, ServiceUnavailableException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { createPublicKey, createHash, type KeyObject } from 'node:crypto';
 import { z } from 'zod';
 import { createAuthVerifier, createClientCredentialsProvider, WalletClient, WalletApiError, type WalletRequest, type WalletResponse } from '@danigil/platform-contracts';
 import { coreEnabled } from '../platform-config';
@@ -25,6 +25,7 @@ export class CoreRequestError extends Error {
 @Injectable()
 export class CoreClient {
     readonly enabled = coreEnabled();
+    private readonly activations = new Map<string, Promise<void>>();
     private credentials?: ReturnType<typeof createClientCredentialsProvider>;
     private verifier?: ReturnType<typeof createAuthVerifier>;
     private keys = new Map<string, KeyObject>();
@@ -160,12 +161,33 @@ export class CoreClient {
         try {
             const user = userSchema.parse(await this.request('/v1/me', { Authorization: 'Bearer ' + token }));
             if (user.id !== claims.sub) throw new Error('Invalid subject');
+            await this.activatePlayer(token!, claims.sub);
             return user;
         } catch (error) {
             if (error instanceof CoreRequestError && error.status >= 500)
                 throw new ServiceUnavailableException('Core identity is unavailable');
+            if (error instanceof CoreRequestError && error.status === 403)
+                throw new ForbiddenException('Core wallet activation was not authorized');
             throw new UnauthorizedException('A valid Core session is required');
         }
+    }
+
+    private activatePlayer(token: string, playerId: string) {
+        let pending = this.activations.get(playerId);
+        if (!pending) {
+            const clientId = process.env.CORE_CLIENT_ID ?? 'spotkick';
+            const key = 'activate:' + createHash('sha256').update(JSON.stringify([clientId, playerId])).digest('hex');
+            pending = this.request('/v1/services/' + encodeURIComponent(clientId) + '/activate', {
+                Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', 'Idempotency-Key': key,
+            }, '{}').then(result => {
+                const grant = z.object({ serviceId: z.literal(clientId), wallets: z.array(z.object({
+                    walletId: userId, currency: z.literal('EUR'), canWrite: z.literal(true),
+                })).min(1) }).safeParse(result);
+                if (!grant.success) throw new CoreRequestError(503, 'core_invalid_grant');
+            }).catch(error => { this.activations.delete(playerId); throw error; });
+            this.activations.set(playerId, pending);
+        }
+        return pending;
     }
 
     private async service(path: string, body?: object, key?: string, correlation?: string) {

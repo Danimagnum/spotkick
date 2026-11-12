@@ -14,10 +14,12 @@
     "db:migrate": "pnpm --filter @spotkick/shared build && pnpm --filter @spotkick/api migrate",
     "test:contract": "vitest run tests/contract apps/api/src/platform/events.test.ts apps/api/src/wallet/core-client.test.ts",
     "test:mutations": "node scripts/check-platform-mutations.mjs",
-    "test:secrets": "node scripts/scan-secrets.mjs"
+    "test:secrets": "node scripts/scan-secrets.mjs",
+    "test:core": "node scripts/test-core-local.mjs",
+    "test:core:mutations": "node scripts/test-core-local.mjs --mutations"
   },
   "devDependencies": {
-    "@danigil/platform-contracts": "0.2.0",
+    "@danigil/platform-contracts": "0.3.0",
     "@playwright/test": "^1.58.0",
     "@types/node": "^22.0.0",
     "tsx": "^4.21.0",

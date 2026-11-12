@@ -24,11 +24,17 @@ it('loads the configured JWKS, follows kid rotation and rejects service tokens',
     const sub = randomUUID();
     let loads = 0;
     let profileCalls = 0;
+    let activations = 0;
     server = createServer((req, res) => {
         res.setHeader('Content-Type', 'application/json');
         if (req.url === '/trusted-keys') {
             loads++;
             res.end(JSON.stringify({ keys }));
+        } else if (req.url === '/v1/services/spotkick/activate') {
+            activations++;
+            expect(req.headers.authorization).toMatch(/^Bearer /);
+            expect(req.headers['idempotency-key']).toMatch(/^activate:[a-f0-9]{64}$/);
+            res.writeHead(201).end(JSON.stringify({ serviceId: 'spotkick', wallets: [{ walletId: randomUUID(), currency: 'EUR', canWrite: true }] }));
         } else if (req.url === '/v1/me') {
             profileCalls++;
             res.end(JSON.stringify({ id: sub, displayName: 'Player' }));
@@ -60,6 +66,7 @@ it('loads the configured JWKS, follows kid rotation and rejects service tokens',
     await expect(client.verifyUserToken(token('new', second.privateKey, { ...claims, nbf: iat + 30 }))).rejects.toThrow('valid Core session');
     await expect(client.verifyUserToken(token('new', second.privateKey, { ...claims, exp: iat }))).rejects.toThrow('valid Core session');
     expect(profileCalls).toBe(4);
+    expect(activations).toBe(1);
     expect(loads).toBe(2);
 });
 
@@ -92,4 +99,36 @@ it.each([false, true])('refreshes a rejected service token once (second rejectio
     expect(requests).toEqual(['token-1', 'token-2'].map(token => ({
         token: 'Bearer ' + token, key: `match:${matchId}:settle`, body: JSON.stringify(body),
     })));
+});
+
+it('fails closed on denied, unavailable or non-EUR activation and retries with the same player key', async () => {
+    const id = randomUUID();
+    let attempt = 0;
+    const keys: string[] = [];
+    server = createServer((req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        if (req.url === '/v1/me') { res.end(JSON.stringify({ id, displayName: 'Player' })); return; }
+        expect(req.url).toBe('/v1/services/spotkick/activate');
+        expect(req.headers.authorization).toBe('Bearer player-session');
+        keys.push(String(req.headers['idempotency-key']));
+        attempt++;
+        if (attempt <= 2) { res.writeHead(attempt === 1 ? 403 : 503).end(JSON.stringify({ code: 'forbidden' })); return; }
+        res.writeHead(201).end(JSON.stringify({ serviceId: 'spotkick', wallets: [{ walletId: randomUUID(), currency: attempt === 3 ? 'USD' : 'EUR', canWrite: true }] }));
+    });
+    await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing HTTP address');
+    vi.stubEnv('CORE_URL', `http://127.0.0.1:${address.port}`);
+    vi.stubEnv('CORE_CLIENT_ID', 'spotkick');
+    const client = new CoreClient();
+    vi.spyOn(client, 'verifyUserToken').mockResolvedValue({ sub: id, iss: 'https://issuer.example', aud: 'spotkick',
+        iat: 1, exp: 2147483647, email: 'player@example.test', roles: ['player'], kycStatus: 'verified' });
+    await expect(client.user('player-session')).rejects.toThrow('not authorized');
+    await expect(client.user('player-session')).rejects.toThrow('unavailable');
+    await expect(client.user('player-session')).rejects.toThrow('unavailable');
+    await expect(client.user('player-session')).resolves.toMatchObject({ id });
+    await expect(client.user('player-session')).resolves.toMatchObject({ id });
+    expect(attempt).toBe(4);
+    expect(new Set(keys).size).toBe(1);
+    vi.restoreAllMocks();
 });

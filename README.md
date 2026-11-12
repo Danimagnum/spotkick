@@ -225,7 +225,7 @@ The load script implements Engine.IO v4 / Socket.IO envelopes with built-in k6 W
 
 ## Platform integration
 
-Standalone is the default, including when CORE_URL is present. Set PLATFORM_MODE=true explicitly for Core identity, grouped wallet commands and Kafka. The API pins **@danigil/platform-contracts 0.2.0**; see [Platform Core mode](docs/PLATFORM_CORE.md). `pnpm test:contract` checks the published contract kit and adapters; `pnpm test:mutations` checks that deliberate regressions are detected against isolated test dependencies. Core is not yet tagged and its payout-from-house, partial-capture and permissions APIs remain incomplete. Real-Core acceptance is gated on Core v0.2.0; expanded load figures and mobile acceptance also remain pending.
+Standalone is the default, including when CORE_URL is present. Set PLATFORM_MODE=true explicitly for Core identity, grouped wallet commands and Kafka. The API pins **@danigil/platform-contracts 0.3.0**; see [Platform Core mode](docs/PLATFORM_CORE.md). `pnpm test:contract` checks the published contract kit and adapters; `pnpm test:mutations` checks that deliberate regressions are detected against isolated test dependencies. Core v0.2.0 has passed the local EUR integration and fault/idempotency tests using its pinned release image. Player-session activation creates wallet grants; settlement uses the grouped /api/v1 settle operation. Reproduce with `pnpm test:core:mutations`; see [saved evidence](docs/core-v020-results.json). Core is not deployed/tested on NAS; expanded load figures and mobile acceptance remain pending.
 
 ## Configuration and observability
 
@@ -254,7 +254,7 @@ The Prometheus endpoint includes active matches from PostgreSQL (use max across 
 
 CI scans the entire Git history and current files with Gitleaks v8.30.1 pinned by digest. Its positive controls must detect a generated disposable private key and API token; logs are redacted. Run `pnpm test:secrets` from the repository root with Docker available. The sole allowlist entry matches one exact public GHCR commit tag in the two image-evidence documents; it does not exclude paths, commits or rules wholesale.
 
-After verify and secrets pass, a push to this PR branch or main publishes `ghcr.io/danimagnum/spotkick-api:sha-<full commit SHA>` for linux/amd64. Publication has no deployment step. It disables attestations/SBOM attachments, forces Docker gzip layers and verifies the remote manifest and a read-only standalone container. The frontend image still requires a build for its actual browser API URL; the public demo is not rebuilt by this job. See [pending platform-infra additions](docs/platform-infra-additions.md) for PC/NAS integration, Prometheus and transfer checks. Core integration and merge remain gated on Core v0.2.0.
+After verify and secrets pass, a push to this PR branch or main publishes `ghcr.io/danimagnum/spotkick-api:sha-<full commit SHA>` for linux/amd64. Publication has no deployment step. It disables attestations/SBOM attachments, forces Docker gzip layers and verifies the remote manifest and a read-only standalone container. The frontend image still requires a build for its actual browser API URL; the public demo is not rebuilt by this job. See [pending platform-infra additions](docs/platform-infra-additions.md) for PC/NAS integration, Prometheus and transfer checks. NAS integration remains separate from the verified local Core v0.2.0 run.
 
 ## How it scales
 

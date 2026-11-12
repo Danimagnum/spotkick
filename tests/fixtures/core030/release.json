@@ -1,0 +1,7 @@
+{
+  "tag": "v0.2.0",
+  "commit": "3fd3c707fc78e1f7096ed6559112106ee47d2009",
+  "image": "ghcr.io/danimagnum/platform-core@sha256:2d9c92709a0b113c849132f3403912a474691b8581175c5505da7a420ca37ca5",
+  "contracts": "0.3.0",
+  "currency": "EUR"
+}

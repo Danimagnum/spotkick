@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { randomUUID, scryptSync } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
@@ -6,7 +7,7 @@ import { Database, makeDataSource } from '../../apps/api/src/database/db';
 import { Identity } from '../../apps/api/src/identity';
 import { MatchEngine, type MatchState } from '../../apps/api/src/matches/engine';
 import { RedisService } from '../../apps/api/src/redis';
-import { CoreClient } from '../../apps/api/src/wallet/core-client';
+import { CoreRequestError, CoreClient } from '../../apps/api/src/wallet/core-client';
 import { Ledger } from '../../apps/api/src/wallet/ledger';
 
 function isolated(name: string) {
@@ -19,6 +20,7 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
     let db: Database, coreDb: ReturnType<typeof makeDataSource>, redis: RedisService;
     let core: CoreClient, engine: MatchEngine, identity: Identity;
     let proxy: Server | undefined;
+    const tokens = new Map<string, string>();
     const players: Awaited<ReturnType<Identity['auth']>>[] = [];
 
     async function post(path: string, body: object, token?: string) {
@@ -36,6 +38,8 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
         isolated('DATABASE_URL');
         const url = new URL(process.env.CORE_URL!);
         if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) throw new Error('Core test API must be local');
+        const live = await (await fetch(new URL('/health/live', url))).json();
+        expect(live).toMatchObject({ version: '0.2.0', commit: '3fd3c707fc78e1f7096ed6559112106ee47d2009' });
         coreDb = await makeDataSource(isolated('SPOTKICK_CORE_TEST_DATABASE_URL')).initialize();
         db = new Database();
         await db.onModuleInit();
@@ -59,8 +63,11 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
             const login = { email: randomUUID() + '@spotkick.test', password: 'Local-test-password-123' };
             const user = await post('/v1/auth/register', { ...login, displayName: 'Test Player ' + i });
             await coreDb.query("UPDATE users SET kyc_status='verified' WHERE id=$1", [user.id]);
-            await coreDb.query("INSERT INTO service_wallet_grants(client_id,account_id,can_write) SELECT $1,id,true FROM accounts WHERE user_id=$2 AND kind='user_cash' AND currency='EUR'", [client, user.id]);
+            expect(await coreDb.query('SELECT account_id FROM service_wallet_grants g JOIN accounts a ON a.id=g.account_id WHERE g.client_id=$1 AND a.user_id=$2', [client, user.id])).toEqual([]);
+            await expect(core.wallet(user.id)).rejects.toMatchObject({ status: 403 });
             const { token } = await core.login(login);
+            tokens.set(user.id, token);
+            expect(await coreDb.query("SELECT a.currency,g.can_write FROM service_wallet_grants g JOIN accounts a ON a.id=g.account_id WHERE g.client_id=$1 AND a.user_id=$2", [client, user.id])).toEqual([{ currency: 'EUR', can_write: true }]);
             await post('/v1/testing/deposit', { amount: '5000', currency: 'EUR' }, token);
             players.push(await identity.auth(token));
         }
@@ -73,6 +80,13 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
         await db?.onApplicationShutdown();
         await coreDb?.destroy();
     });
+
+    function restartEngine() {
+        core = new CoreClient();
+        const ledger = new Ledger();
+        identity = new Identity(db, ledger, core);
+        engine = new MatchEngine(db, ledger, identity, redis);
+    }
 
     async function start() {
         for (const player of players) await engine.queue(player.id, 1000);
@@ -93,10 +107,12 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
 
     it('replays lost replies, settles the winner once, refunds cancellation and rolls back rejected pairing', async () => {
         const upstream = process.env.CORE_URL!;
-        const lost = new Set(['reserve', 'settle']);
+        const lost = new Set(['reserve', 'settle', 'release']);
+        let unavailable = false;
         proxy = createServer(async (req, res) => {
             try {
                 const path = req.url || '/';
+                if (unavailable) { res.writeHead(503).end(JSON.stringify({ code: 'internal_error', message: 'Injected outage', correlationId: 'core-fault-test' })); return; }
                 const chunks: Buffer[] = [];
                 for await (const chunk of req) chunks.push(chunk);
                 const headers = new Headers();
@@ -109,7 +125,7 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
                     signal: AbortSignal.timeout(3500),
                 });
                 const body = await response.text();
-                const action = /^\/api\/v1\/spotkick\/matches\/[^/]+\/(reserve|settle)$/.exec(path)?.[1];
+                const action = /^\/api\/v1\/spotkick\/matches\/[^/]+\/(reserve|settle|release)$/.exec(path)?.[1];
                 if (response.ok && action && lost.delete(action)) {
                     res.destroy();
                     return;
@@ -127,6 +143,7 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
         await engine.tick();
         expect((await engine.get(id, players[0].id)).phase).toBe('MATCHED');
         expect(await available()).toEqual(['4000', '4000']);
+        restartEngine();
         await retry(id);
         expect((await engine.get(id, players[0].id)).phase).toBe('ROUND_1_COMMIT');
         const [row] = await db.source.query('SELECT state FROM matches WHERE id=$1', [id]);
@@ -143,8 +160,14 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
             await engine.tick();
         }
         expect((await engine.get(id, a.id)).phase).toBe('RESOLVED');
+        unavailable = true;
         await engine.tick();
+        expect((await engine.get(id, a.id)).winner).toBe(a.id);
+        restartEngine();
+        unavailable = false;
+        await retry(id);
         expect((await engine.get(id, a.id)).phase).toBe('RESOLVED');
+        restartEngine();
         await retry(id);
         const settled = await engine.get(id, a.id);
         expect(settled).toMatchObject({ phase: 'SETTLED', winner: a.id, payout: 1940 });
@@ -153,6 +176,19 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
             { topic: 'spotkick.match.started.v1', data: { matchId: id, participantIds: [a.id, b.id] } },
             { topic: 'spotkick.match.settled.v1', data: { matchId: id, result: 'win', settlementId: settled.settlementId, winnerId: a.id } },
         ]);
+        const [beforeReplay] = await coreDb.query('SELECT COUNT(*)::int AS count FROM ledger_transactions');
+        const replay = () => core.match(id, 'settle', { winnerId: a.id, rakeBps: 300 });
+        const retryReplay = async () => {
+            for (let i = 0; ; i++) {
+                try { return await replay(); } catch (error) {
+                    if (!(error instanceof CoreRequestError) || !error.retryable || i >= 10) throw error;
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+            }
+        };
+        expect(await Promise.all(Array.from({ length: 20 }, retryReplay))).toEqual(Array(20).fill({ status: 'settled', payout: '1940', rake: '60' }));
+        await expect(core.match(id, 'settle', { winnerId: b.id, rakeBps: 300 })).rejects.toMatchObject({ status: 409, code: 'idempotency_conflict' });
+        expect((await coreDb.query('SELECT COUNT(*)::int AS count FROM ledger_transactions'))[0]).toEqual(beforeReplay);
         const result = await available();
         expect(result[players.findIndex(p => p.id === a.id)]).toBe('5940');
         expect(result[players.findIndex(p => p.id === b.id)]).toBe('4000');
@@ -174,13 +210,19 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
         await engine.tick();
         await engine.abandon(cancelled);
         await engine.tick();
+        expect(await available()).toEqual(result);
+        restartEngine();
+        await retry(cancelled);
         const released = await engine.get(cancelled, a.id);
         expect(released.phase).toBe('ABANDONED');
         expect(released.settlementId).toBeTruthy();
+        const [beforeReleaseReplay] = await coreDb.query('SELECT COUNT(*)::int AS count FROM ledger_transactions');
+        await Promise.all(Array.from({ length: 20 }, () => core.match(cancelled, 'release')));
+        expect((await coreDb.query('SELECT COUNT(*)::int AS count FROM ledger_transactions'))[0]).toEqual(beforeReleaseReplay);
         expect(await available()).toEqual(result);
 
         const excluded = players.map(player => player.id).sort()[1];
-        await coreDb.query("UPDATE rg_profiles SET permanently_excluded=true WHERE user_id=$1", [excluded]);
+        await post('/v1/responsible-gaming/restrictions', { kind: 'self_exclusion', days: 3650, permanent: true }, tokens.get(excluded));
         const rejected = await start();
         await engine.tick();
         expect(await engine.get(rejected, a.id)).toMatchObject({ phase: 'ABANDONED', walletIssue: 'responsible_gaming' });
@@ -188,5 +230,16 @@ describe.skipIf(process.env.SPOTKICK_CORE_E2E !== '1')('SpotKick with live Platf
         expect(await coreDb.query("SELECT id FROM holds WHERE reference=$1", ['spotkick-match:' + rejected])).toEqual([]);
         expect(await db.source.query('SELECT id FROM platform_outbox WHERE aggregate_key=$1', [rejected])).toEqual([]);
         expect(lost.size).toBe(0);
+        const journals = await coreDb.query('SELECT operation,COUNT(*)::int AS count FROM ledger_transactions WHERE reference=$1 GROUP BY operation ORDER BY operation', ['spotkick-match:' + id]);
+        if (process.env.SPOTKICK_CORE_EVIDENCE_PATH) writeFileSync(process.env.SPOTKICK_CORE_EVIDENCE_PATH, JSON.stringify({
+            verifiedAt: new Date().toISOString(), coreTag: 'v0.2.0', coreCommit: '3fd3c707fc78e1f7096ed6559112106ee47d2009',
+            coreImage: 'ghcr.io/danimagnum/platform-core@sha256:2d9c92709a0b113c849132f3403912a474691b8581175c5505da7a420ca37ca5',
+            contracts: '0.3.0', currency: 'EUR', location: 'isolated local Docker stack, never NAS',
+            results: { playerSessionGrants: 'passed', machineWithoutPlayerGrant: '403', completedMatch: 'passed',
+                lostReserveReplyAndEngineRestart: 'passed', outageAfterDecision: 'passed', lostSettleReplyAndEngineRestart: 'passed',
+                concurrentSettleReplays: 20, changedWinnerSameKey: '409 idempotency_conflict', duplicateJournalTransactions: 0,
+                lostRefundReplyAndEngineRestart: 'passed', concurrentReleaseReplays: 20, selfExclusionViaPlayerSession: 'reservation rejected with zero holds',
+                balancesAfterSettlementAndRefund: result, payout: '1940', commission: '60', ledgerNet: book.net, journals },
+        }, null, 2) + '\n');
     });
 });

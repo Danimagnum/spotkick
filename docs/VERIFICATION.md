@@ -76,3 +76,9 @@ The subsequent health-queue regression test covers recovery after all 64 pending
 Gitleaks flagged the public `sha-67f725871ad3ad232d9e5666d2b564b56a5d0fc3` image tag as a generic API key when written after the image repository name. .gitleaks.toml retains all default rules and allows only that exact nonsecret tag in the two evidence documents (path AND secret match). No entire path, commit or rule is excluded. The positive private-key control remains mandatory.
 
 After this narrowly scoped exception, a second synthetic generic-API-key control was added. Both controls were detected with redacted output; full-history and current-file scans then passed.
+
+## Core v0.2.0 / contracts 0.3.0, 12 November 2026
+
+The exact image and running /health/live were checked against commit 3fd3c707fc78e1f7096ed6559112106ee47d2009 before the opt-in test. `pnpm test:core:mutations` passed locally with real PostgreSQL/Redis/Kafka and the released Core image. Player grants were absent and machine wallet access returned 403 before player activation. Player sessions created EUR grants. The completed match paid 1940 with commission 60; the global ledger sum was zero. Three successful Core replies were deliberately lost (reserve, settle, release), with new engine/client instances resuming the persisted commands. A 503 after the winning decision did not change that decision. Twenty concurrent settlement replays and twenty refund replays added no journal transactions; changed winner with the same key returned 409. Self-exclusion via the player API prevented a new reservation without holds. [Machine-readable results](core-v020-results.json).
+
+Two mutations were detected against real Core: bypassing player activation and changing the reserve key after a lost reply. KYC verification and test deposits are fixtures on isolated test databases; full KYC/storage and real funding are outside this test. No NAS/staging endpoints were used.

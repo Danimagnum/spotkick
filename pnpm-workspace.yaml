@@ -7,4 +7,4 @@ allowBuilds:
   '@nestjs/core': true
   sharp: true
 minimumReleaseAgeExclude:
-  - '@danigil/platform-contracts@0.2.0'
+  - '@danigil/platform-contracts@0.3.0'
