@@ -4,11 +4,12 @@ import { zones, type Zone } from '@spotkick/shared';
 export function Ball({ size = 24 }: {
     size?: number;
 }) { return <svg width={size} height={size} viewBox="0 0 40 40" fill="none" aria-hidden="true"><circle cx="20" cy="20" r="18" fill="#eef2e7" stroke="#abb9b6"/><path d="m20 11 8 6-3 9H15l-3-9 8-6Z" fill="#20312f"/><path d="m20 2 1 9M4 14l8 3m3 9-6 8m16-8 6 8m-3-17 8-4" stroke="#20312f" strokeWidth="2"/></svg>; }
-export function Pitch({ result, role = 'shooter', active = false, preview = false }: {
+export function Pitch({ result, role = 'shooter', active = false, preview = false, reduceReplays = false }: {
     result?: { shot: Zone; keeper: Zone; goal: boolean; key: number };
     role?: 'shooter' | 'keeper';
     active?: boolean;
     preview?: boolean;
+    reduceReplays?: boolean;
 }) {
     const reducedMotion = useReducedMotion();
     const replay = result && `/retro/${result.shot}-${result.keeper}`;
@@ -28,7 +29,7 @@ export function Pitch({ result, role = 'shooter', active = false, preview = fals
             </div>
         </div>
         <div className="pixel-field" style={{ backgroundImage: `url(${scene})` }}>
-            {result && !reducedMotion && <video
+            {result && !reducedMotion && !reduceReplays && <video
                 key={`${replay}-${result.key}`}
                 src={`${replay}.mp4`}
                 poster="/retro/ready.webp"
